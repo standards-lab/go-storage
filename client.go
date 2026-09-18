@@ -100,8 +100,9 @@ type Capabilities struct {
 // Classifying a provider's errors into this package's sentinels is the
 // provider adapter's job. Get and Stat return an error matching
 // [ErrNotFound] for a missing key. Delete is idempotent: deleting a missing
-// key is a no-op success, never [ErrNotFound]. Any method may return an
-// error matching [ErrUnavailable] when the store is unreachable.
+// key is a no-op success, never [ErrNotFound]. Any method, EnsureContainer
+// and Probe included, may return an error matching [ErrUnavailable] when the
+// store is unreachable.
 type Client interface {
 	// Put writes body as the object at key, replacing any existing object,
 	// and returns the stored object's metadata.
@@ -120,6 +121,12 @@ type Client interface {
 
 	// List returns one page of objects selected by opts.
 	List(ctx context.Context, opts ListOptions) (Page, error)
+
+	// EnsureContainer creates the configured container and succeeds when it
+	// already exists. It is idempotent, and it never deletes or reconfigures
+	// an existing container. It is not an object operation. [Store] calls it
+	// from Start and EnsureContainer.
+	EnsureContainer(ctx context.Context) error
 
 	// Probe reports whether the configured credential and container are
 	// reachable. It is not an object operation. [Store] calls it from Start

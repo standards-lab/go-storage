@@ -10,7 +10,9 @@
 // # The standard tier
 //
 // [Client] has five object operations (Put, Get, Stat, Delete, and List) plus
-// Probe and Capabilities. It offers no conditional writes and no object
+// EnsureContainer, Probe, and Capabilities. EnsureContainer creates the
+// configured container and succeeds when it already exists; it never deletes
+// or reconfigures one. [Client] offers no conditional writes and no object
 // metadata beyond ContentType, so the owning database row remains the
 // authority for an object's metadata and for concurrent updates. A feature
 // that only some providers offer, such as leases, access tiers, and presigned
@@ -44,11 +46,14 @@
 //		Check:    store,
 //	})
 //
-// Start probes the provider, bounded by the configured request timeout, so an
-// unreachable container fails startup rather than serving traffic unready.
-// Shutdown clears readiness and closes the provider when it implements
-// io.Closer. It closes the provider at most once across repeated calls, and
-// it is safe before Start and after a failed Start.
+// Start ensures the configured container exists and then probes the provider,
+// both bounded by the configured request timeout, so an empty store starts
+// cleanly and an unreachable one fails startup rather than serving traffic
+// unready. [Store.EnsureContainer] repeats the container step on demand,
+// without a readiness check, so a container deleted while the process runs
+// can be recovered. Shutdown clears readiness and closes the provider when it
+// implements io.Closer. It closes the provider at most once across repeated
+// calls, and it is safe before Start and after a failed Start.
 //
 // # Readiness
 //
@@ -70,7 +75,8 @@
 // A library ships no policy numbers, so MaxObjectSize and ListPageSize have no
 // default. A value of 0 means unbounded for MaxObjectSize and the provider's
 // own page size for ListPageSize. RequestTimeout is the one default, 10
-// seconds, and it bounds only the probes Store makes in Start and Ready.
+// seconds, and it bounds only the calls Store makes on its own behalf in
+// Start and Ready.
 // Finalize composes the override names from the prefix it receives (through
 // [NewEnv], recorded on [Env] for introspection), and an empty prefix
 // disables the overrides.

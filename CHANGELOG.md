@@ -10,9 +10,14 @@ only; each provider sub-module keeps its own.
 ### Added
 
 - `Client` — the standard-tier interface over the five object operations Azure Blob and S3
-  share (`Put`, `Get`, `Stat`, `Delete`, `List`), plus `Probe` and `Capabilities`, with the
-  `Object`, `Blob`, `PutOptions`, `GetOptions`, `ListOptions`, and `Page` types. It has no
-  conditional writes and no object metadata beyond `ContentType`.
+  share (`Put`, `Get`, `Stat`, `Delete`, `List`), plus `EnsureContainer`, `Probe`, and
+  `Capabilities`, with the `Object`, `Blob`, `PutOptions`, `GetOptions`, `ListOptions`, and
+  `Page` types. It has no conditional writes and no object metadata beyond `ContentType`.
+- `Client.EnsureContainer` — creates the configured container and succeeds when it already
+  exists. It is idempotent and never deletes or reconfigures an existing container.
+- `Store.EnsureContainer` — delegates to the provider under the caller's context with no
+  readiness check, so a container deleted while the process runs can be recovered.
+  `Store.Container` returns the configured container name.
 - `Capabilities` — the key constraints a provider declares: a maximum length and a `ValidateKey`
   function.
 - `ErrNotFound`, `ErrTooLarge`, `ErrNotReady`, and `ErrUnavailable` — the error sentinels a
@@ -22,8 +27,9 @@ only; each provider sub-module keeps its own.
   timeout, on go-core's Merge-and-Finalize contract, with `Env` and `NewEnv` composing the
   override names. `Container` is the one required field. `MaxObjectSize` and `ListPageSize` have
   no default, and `RequestTimeout` defaults to 10 seconds.
-- `Store` — the lifecycle wrapper that implements `Client`: a probe at `Start`, a live bounded
-  probe in `Ready`, a `Shutdown` that closes the provider at most once, `ErrNotReady` from every
+- `Store` — the lifecycle wrapper that implements `Client`: an `EnsureContainer` and then a probe
+  at `Start`, both under one context bounded by `RequestTimeout`, a live bounded probe in
+  `Ready`, a `Shutdown` that closes the provider at most once, `ErrNotReady` from every
   object operation outside the started window, the configured page size on a `List` with no
   limit, and the `MaxObjectSize` bound on `Put` through a reader that fails on the first byte
   past it.

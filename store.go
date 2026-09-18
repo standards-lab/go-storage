@@ -10,22 +10,24 @@ import (
 )
 
 // Store wraps a provider's Client with lifecycle integration and the limits
-// from Config. Construction performs no I/O, Start establishes connectivity,
-// and Ready reports it live. Start and Shutdown carry the lifecycle hook
-// signature, so the composition root registers the bare method values, and
-// Ready satisfies lifecycle.ReadinessChecker structurally; the package
-// registers no hooks of its own.
+// from Config. Construction performs no I/O, Start ensures the container
+// exists and establishes connectivity, and Ready reports connectivity live.
+// Start and Shutdown carry the lifecycle hook signature, so the composition
+// root registers the bare method values, and Ready satisfies
+// lifecycle.ReadinessChecker structurally; the package registers no hooks of
+// its own.
 //
 // Store implements Client. Every object operation returns [ErrNotReady]
 // before a successful Start or after Shutdown and otherwise delegates to the
 // provider under the caller's context. Store applies no timeout of its own to
 // an object operation; the caller's context and the provider's transport
-// govern. The configured RequestTimeout bounds only the probes Start and
-// Ready make on their own behalf.
+// govern. The configured RequestTimeout bounds only the calls Start and Ready
+// make on their own behalf.
 //
 // A Store is safe for concurrent use.
 type Store struct {
 	client         Client
+	container      string
 	maxObjectSize  int64
 	listPageSize   int
 	requestTimeout time.Duration
@@ -45,27 +47,39 @@ func New(c Client, cfg Config) *Store {
 	}
 	return &Store{
 		client:         c,
+		container:      cfg.Container,
 		maxObjectSize:  cfg.MaxObjectSize,
 		listPageSize:   cfg.ListPageSize,
 		requestTimeout: cfg.RequestTimeout.Duration(),
 	}
 }
 
-// Start probes the provider under the configured RequestTimeout and marks
-// the store started. A failure matches [ErrUnavailable] and keeps the
-// provider's error matchable, and the store stays not started. There is no
-// started guard: a repeat Start probes again.
+// Start ensures the configured container exists, then probes the provider,
+// both under one context bounded by the configured RequestTimeout, and marks
+// the store started. A failure of either step matches [ErrUnavailable] and
+// keeps the provider's error matchable, and the store stays not started.
+// There is no started guard: a repeat Start ensures and probes again.
 func (s *Store) Start(ctx context.Context) error {
-	probeCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
+	startCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
 	defer cancel()
-	if err := s.client.Probe(probeCtx); err != nil {
-		if errors.Is(err, ErrUnavailable) {
-			return err
-		}
-		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+	if err := s.client.EnsureContainer(startCtx); err != nil {
+		return unavailable(err)
+	}
+	if err := s.client.Probe(startCtx); err != nil {
+		return unavailable(err)
 	}
 	s.started.Store(true)
 	return nil
+}
+
+// unavailable classifies a Start failure under [ErrUnavailable]. An error the
+// provider already classified passes through unchanged, so the sentinel is
+// never stacked twice.
+func unavailable(err error) error {
+	if errors.Is(err, ErrUnavailable) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", ErrUnavailable, err)
 }
 
 // Shutdown clears readiness and, when the Client implements io.Closer,
@@ -178,6 +192,15 @@ func (s *Store) List(ctx context.Context, opts ListOptions) (Page, error) {
 	return s.client.List(ctx, opts)
 }
 
+// EnsureContainer creates the configured container and succeeds when it
+// already exists, under the caller's context. It has no readiness check: a
+// missing container is what it corrects, so it works before Start, after
+// Shutdown, and while Ready reports false. The provider's error is returned
+// unchanged.
+func (s *Store) EnsureContainer(ctx context.Context) error {
+	return s.client.EnsureContainer(ctx)
+}
+
 // Probe reports whether the provider is reachable, under the caller's
 // context. It returns [ErrNotReady] before Start or after Shutdown.
 func (s *Store) Probe(ctx context.Context) error {
@@ -191,6 +214,12 @@ func (s *Store) Probe(ctx context.Context) error {
 // fact about the provider, so the call needs no readiness check.
 func (s *Store) Capabilities() Capabilities {
 	return s.client.Capabilities()
+}
+
+// Container returns the configured container name, copied from Config at
+// New.
+func (s *Store) Container() string {
+	return s.container
 }
 
 // boundedReader lets exactly remain bytes through and fails on the first byte

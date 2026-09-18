@@ -202,20 +202,56 @@ func TestStore_NotReadyBeforeStart(t *testing.T) {
 	}
 }
 
-func TestStore_StartProbesAndReports(t *testing.T) {
+func TestStore_StartEnsuresThenProbesAndReports(t *testing.T) {
 	f := newFake()
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	if got := f.ensures.Load(); got != 1 {
+		t.Errorf("ensures after Start = %d, want 1", got)
+	}
 	if got := f.probes.Load(); got != 1 {
 		t.Errorf("probes after Start = %d, want 1", got)
 	}
 	wantProbeDeadline(t, f)
+	// Both calls run under the one context Start builds, so the ensure
+	// carries the probe's deadline exactly.
+	ensureDeadline, bounded := f.lastEnsure()
+	if !bounded {
+		t.Fatal("lastEnsure() reports no deadline, want the one Start built")
+	}
+	if probeDeadline, _ := f.lastProbe(); !ensureDeadline.Equal(probeDeadline) {
+		t.Errorf("ensure deadline %v differs from probe deadline %v, want the same context", ensureDeadline, probeDeadline)
+	}
 	if !s.Ready() {
 		t.Error("Ready() = false after a successful Start, want true")
 	}
+}
+
+func TestStore_StartCreatesMissingContainer(t *testing.T) {
+	f := newFake(withoutContainer())
+	s := storage.New(f, finalizedConfig(t, 0, 0))
+
+	// The fake's Probe fails until the container exists, so a successful
+	// Start with one call of each proves EnsureContainer ran before Probe.
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start against an empty fake: %v", err)
+	}
+	if got := f.ensures.Load(); got != 1 {
+		t.Errorf("ensures after Start = %d, want 1", got)
+	}
+	if got := f.probes.Load(); got != 1 {
+		t.Errorf("probes after Start = %d, want 1", got)
+	}
+	if !f.hasContainer.Load() {
+		t.Error("the container does not exist after Start, want it created")
+	}
+	if !s.Ready() {
+		t.Error("Ready() = false after Start created the container, want true")
+	}
+	putString(t, s, "k", "v")
 }
 
 func TestStore_StartFailureWrapsSentinelAndCause(t *testing.T) {
@@ -238,15 +274,23 @@ func TestStore_StartFailureWrapsSentinelAndCause(t *testing.T) {
 	if got := strings.Count(err.Error(), storage.ErrUnavailable.Error()); got != 1 {
 		t.Errorf("error %q names ErrUnavailable %d times, want once", err, got)
 	}
+	// The outage fails the ensure, which is the first step, so Start stops
+	// there.
+	if got := f.ensures.Load(); got != 1 {
+		t.Errorf("ensures after a failed Start = %d, want 1", got)
+	}
+	if got := f.probes.Load(); got != 0 {
+		t.Errorf("probes after a failed ensure = %d, want 0", got)
+	}
 	if s.Ready() {
 		t.Error("Ready() = true after a failed Start, want false")
 	}
 	wantNotReady(t, s, f)
 }
 
-func TestStore_StartWrapsUnclassifiedProbeError(t *testing.T) {
-	cause := errors.New("raw probe failure")
-	f := &probeErrClient{fake: newFake(), err: cause}
+func TestStore_StartWrapsUnclassifiedEnsureError(t *testing.T) {
+	cause := errors.New("raw ensure failure")
+	f := &ensureErrClient{fake: newFake(), err: cause}
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	err := s.Start(context.Background())
@@ -256,19 +300,159 @@ func TestStore_StartWrapsUnclassifiedProbeError(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Errorf("errors.Is(err, cause) = false for %v", err)
 	}
+	if got := f.probes.Load(); got != 0 {
+		t.Errorf("probes after a failed ensure = %d, want 0", got)
+	}
 	if s.Ready() {
 		t.Error("Ready() = true after a failed Start, want false")
 	}
+	wantNotReady(t, s, f.fake)
 }
 
-// probeErrClient is a fake whose Probe fails with an error that is not
-// classified under ErrUnavailable, so the Start wrap path can be exercised.
+func TestStore_StartProbeFailureAfterEnsure(t *testing.T) {
+	cause := errors.New("raw probe failure")
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"unclassified", cause},
+		{"classified", fmt.Errorf("%w: %w", storage.ErrUnavailable, cause)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &probeErrClient{fake: newFake(), err: tc.err}
+			s := storage.New(f, finalizedConfig(t, 0, 0))
+
+			err := s.Start(context.Background())
+			if !errors.Is(err, storage.ErrUnavailable) {
+				t.Errorf("errors.Is(err, ErrUnavailable) = false for %v", err)
+			}
+			if !errors.Is(err, cause) {
+				t.Errorf("errors.Is(err, cause) = false for %v", err)
+			}
+			if got := strings.Count(err.Error(), storage.ErrUnavailable.Error()); got != 1 {
+				t.Errorf("error %q names ErrUnavailable %d times, want once", err, got)
+			}
+			// The ensure succeeded; only the probe failed.
+			if got := f.ensures.Load(); got != 1 {
+				t.Errorf("ensures = %d, want 1", got)
+			}
+			if s.Ready() {
+				t.Error("Ready() = true after a failed Start, want false")
+			}
+			wantNotReady(t, s, f.fake)
+		})
+	}
+}
+
+// probeErrClient is a fake whose Probe fails with the configured error, so
+// the Start wrap path can be exercised after a successful ensure.
 type probeErrClient struct {
 	*fake
 	err error
 }
 
 func (c *probeErrClient) Probe(context.Context) error { return c.err }
+
+// ensureErrClient is a fake whose EnsureContainer fails with the configured
+// error, which is not classified under ErrUnavailable.
+type ensureErrClient struct {
+	*fake
+	err error
+}
+
+func (c *ensureErrClient) EnsureContainer(context.Context) error { return c.err }
+
+func TestStore_EnsureContainerNeedsNoReadiness(t *testing.T) {
+	f := newFake(withoutContainer())
+	s := storage.New(f, finalizedConfig(t, 0, 0))
+	ctx := context.Background()
+
+	// Before Start: the call reaches the provider under the caller's own
+	// context and leaves the store not started.
+	if err := s.EnsureContainer(ctx); err != nil {
+		t.Fatalf("EnsureContainer before Start: %v", err)
+	}
+	if got := f.ensures.Load(); got != 1 {
+		t.Errorf("ensures = %d, want 1", got)
+	}
+	if _, bounded := f.lastEnsure(); bounded {
+		t.Error("EnsureContainer added a deadline to a background context, want the caller's context passed through")
+	}
+	if !f.hasContainer.Load() {
+		t.Error("the container does not exist after EnsureContainer, want it created")
+	}
+	wantNotReady(t, s, f)
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if got := f.ensures.Load(); got != 2 {
+		t.Errorf("ensures after Start = %d, want 2", got)
+	}
+
+	// While not ready: the container disappears, Ready reports it without
+	// creating anything, and EnsureContainer recovers it.
+	f.hasContainer.Store(false)
+	if s.Ready() {
+		t.Error("Ready() = true with the container gone, want false")
+	}
+	if got := f.ensures.Load(); got != 2 {
+		t.Errorf("ensures after Ready = %d, want 2 (Ready does not create)", got)
+	}
+	if err := s.EnsureContainer(ctx); err != nil {
+		t.Fatalf("EnsureContainer while not ready: %v", err)
+	}
+	if got := f.ensures.Load(); got != 3 {
+		t.Errorf("ensures = %d, want 3", got)
+	}
+	if !s.Ready() {
+		t.Error("Ready() = false after EnsureContainer recovered the container, want true")
+	}
+
+	// After Shutdown.
+	if err := s.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if err := s.EnsureContainer(ctx); err != nil {
+		t.Errorf("EnsureContainer after Shutdown = %v, want nil", err)
+	}
+	if got := f.ensures.Load(); got != 4 {
+		t.Errorf("ensures = %d, want 4", got)
+	}
+	wantNotReady(t, s, f)
+}
+
+func TestStore_EnsureContainerReturnsProviderError(t *testing.T) {
+	cause := errors.New("provider refused to create the container")
+	f := &ensureErrClient{fake: newFake(), err: cause}
+	s := storage.New(f, finalizedConfig(t, 0, 0))
+
+	// The provider's error passes through as is, with nothing wrapped
+	// around it.
+	if err := s.EnsureContainer(context.Background()); err != cause {
+		t.Errorf("EnsureContainer = %v, want the provider's error unchanged", err)
+	}
+
+	down := newFake()
+	down.down.Store(true)
+	err := storage.New(down, finalizedConfig(t, 0, 0)).EnsureContainer(context.Background())
+	if !errors.Is(err, storage.ErrUnavailable) || !errors.Is(err, errFakeDown) {
+		t.Errorf("EnsureContainer during an outage = %v, want the fake's classified error", err)
+	}
+	if got := strings.Count(err.Error(), storage.ErrUnavailable.Error()); got != 1 {
+		t.Errorf("error %q names ErrUnavailable %d times, want once", err, got)
+	}
+}
+
+func TestStore_Container(t *testing.T) {
+	cfg := finalizedConfig(t, 0, 0)
+	s := storage.New(newFake(), cfg)
+
+	if got := s.Container(); got != cfg.Container {
+		t.Errorf("Container() = %q, want the configured %q", got, cfg.Container)
+	}
+}
 
 func TestStore_ReadySelfHeals(t *testing.T) {
 	f := newFake()

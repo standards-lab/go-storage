@@ -32,16 +32,30 @@ var errFakeDown = errors.New("fake: connection refused")
 // does not hold.
 var errFakeMissing = errors.New("fake: no such key")
 
+// errFakeNoContainer is the cause the fake wraps under ErrNotFound while its
+// container does not exist.
+var errFakeNoContainer = errors.New("fake: no such container")
+
 // fake is an in-memory storage.Client. It honors the Client contract so the
 // Store tests can wrap it, and it records what it received so those tests can
 // assert what Store passed through. Its outage toggle makes every method,
-// Probe included, fail with ErrUnavailable until the toggle is cleared.
+// EnsureContainer and Probe included, fail with ErrUnavailable until the
+// toggle is cleared. Its container toggle models whether the container
+// exists: while it does not, Probe and every object operation fail with
+// ErrNotFound, and EnsureContainer creates it.
 type fake struct {
 	// down is the outage toggle. Every method consults it on entry.
 	down atomic.Bool
 
+	// hasContainer is the container toggle. It starts true; withoutContainer
+	// clears it, and EnsureContainer sets it.
+	hasContainer atomic.Bool
+
 	// puts counts Put calls, whether or not they succeeded.
 	puts atomic.Int64
+
+	// ensures counts EnsureContainer calls, whether or not they succeeded.
+	ensures atomic.Int64
 
 	// probes counts Probe calls, whether or not they succeeded.
 	probes atomic.Int64
@@ -58,6 +72,9 @@ type fake struct {
 
 	lastPutOpts     storage.PutOptions
 	lastPutConsumed int64
+
+	lastEnsureDeadline time.Time
+	lastEnsureBounded  bool
 
 	lastProbeDeadline time.Time
 	lastProbeBounded  bool
@@ -87,12 +104,19 @@ func withCapabilities(c storage.Capabilities) fakeOption {
 	return func(f *fake) { f.caps = c }
 }
 
+// withoutContainer starts the fake with no container, so a test can watch
+// EnsureContainer create it.
+func withoutContainer() fakeOption {
+	return func(f *fake) { f.hasContainer.Store(false) }
+}
+
 func newFake(opts ...fakeOption) *fake {
 	f := &fake{
 		now:      time.Now,
 		pageSize: 3,
 		objects:  make(map[string]fakeObject),
 	}
+	f.hasContainer.Store(true)
 	for _, opt := range opts {
 		opt(f)
 	}
@@ -115,6 +139,14 @@ func (f *fake) lastPut() (storage.PutOptions, int64) {
 	return f.lastPutOpts, f.lastPutConsumed
 }
 
+// lastEnsure reports the deadline of the context the most recent
+// EnsureContainer received, and whether that context carried one.
+func (f *fake) lastEnsure() (time.Time, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastEnsureDeadline, f.lastEnsureBounded
+}
+
 // lastProbe reports the deadline of the context the most recent Probe
 // received, and whether that context carried one.
 func (f *fake) lastProbe() (time.Time, bool) {
@@ -134,10 +166,17 @@ func (f *fake) unavailable() error {
 	return fmt.Errorf("%w: %w", storage.ErrUnavailable, errFakeDown)
 }
 
+func (f *fake) noContainer() error {
+	return fmt.Errorf("%w: %w", storage.ErrNotFound, errFakeNoContainer)
+}
+
 func (f *fake) Put(_ context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
 	f.puts.Add(1)
 	if f.down.Load() {
 		return storage.Object{}, f.unavailable()
+	}
+	if !f.hasContainer.Load() {
+		return storage.Object{}, f.noContainer()
 	}
 
 	data, readErr := io.ReadAll(body)
@@ -173,6 +212,9 @@ func (f *fake) Get(_ context.Context, key string, _ storage.GetOptions) (storage
 	if f.down.Load() {
 		return storage.Blob{}, f.unavailable()
 	}
+	if !f.hasContainer.Load() {
+		return storage.Blob{}, f.noContainer()
+	}
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -190,6 +232,9 @@ func (f *fake) Stat(_ context.Context, key string) (storage.Object, error) {
 	if f.down.Load() {
 		return storage.Object{}, f.unavailable()
 	}
+	if !f.hasContainer.Load() {
+		return storage.Object{}, f.noContainer()
+	}
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -204,6 +249,9 @@ func (f *fake) Delete(_ context.Context, key string) error {
 	if f.down.Load() {
 		return f.unavailable()
 	}
+	if !f.hasContainer.Load() {
+		return f.noContainer()
+	}
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -216,6 +264,9 @@ func (f *fake) Delete(_ context.Context, key string) error {
 func (f *fake) List(_ context.Context, opts storage.ListOptions) (storage.Page, error) {
 	if f.down.Load() {
 		return storage.Page{}, f.unavailable()
+	}
+	if !f.hasContainer.Load() {
+		return storage.Page{}, f.noContainer()
 	}
 
 	f.mu.Lock()
@@ -246,6 +297,24 @@ func (f *fake) List(_ context.Context, opts storage.ListOptions) (storage.Page, 
 	return page, nil
 }
 
+// EnsureContainer creates the container when it does not exist. It is
+// idempotent: a container that already exists is left as it is.
+func (f *fake) EnsureContainer(ctx context.Context) error {
+	f.ensures.Add(1)
+
+	deadline, bounded := ctx.Deadline()
+	f.mu.Lock()
+	f.lastEnsureDeadline = deadline
+	f.lastEnsureBounded = bounded
+	f.mu.Unlock()
+
+	if f.down.Load() {
+		return f.unavailable()
+	}
+	f.hasContainer.Store(true)
+	return nil
+}
+
 func (f *fake) Probe(ctx context.Context) error {
 	f.probes.Add(1)
 
@@ -257,6 +326,9 @@ func (f *fake) Probe(ctx context.Context) error {
 
 	if f.down.Load() {
 		return f.unavailable()
+	}
+	if !f.hasContainer.Load() {
+		return f.noContainer()
 	}
 	return nil
 }
@@ -574,6 +646,7 @@ func TestFake_OutageToggle(t *testing.T) {
 			_, err := f.List(ctx, storage.ListOptions{})
 			return err
 		}},
+		{"EnsureContainer", func() error { return f.EnsureContainer(ctx) }},
 		{"Probe", func() error { return f.Probe(ctx) }},
 	}
 
@@ -683,6 +756,82 @@ func TestFake_ProbeRecordsDeadline(t *testing.T) {
 	}
 	if !deadline.Equal(want) {
 		t.Errorf("lastProbe() deadline = %v, want %v", deadline, want)
+	}
+}
+
+func TestFake_EnsureContainerCreatesOnce(t *testing.T) {
+	f := newFake(withoutContainer())
+	ctx := context.Background()
+
+	ops := []struct {
+		name string
+		call func() error
+	}{
+		{"Put", func() error {
+			_, err := f.Put(ctx, "k", strings.NewReader("v"), storage.PutOptions{})
+			return err
+		}},
+		{"Get", func() error {
+			_, err := f.Get(ctx, "k", storage.GetOptions{})
+			return err
+		}},
+		{"Stat", func() error {
+			_, err := f.Stat(ctx, "k")
+			return err
+		}},
+		{"Delete", func() error { return f.Delete(ctx, "k") }},
+		{"List", func() error {
+			_, err := f.List(ctx, storage.ListOptions{})
+			return err
+		}},
+		{"Probe", func() error { return f.Probe(ctx) }},
+	}
+
+	for _, op := range ops {
+		err := op.call()
+		if !errors.Is(err, storage.ErrNotFound) {
+			t.Errorf("%s without a container = %v, want ErrNotFound", op.name, err)
+		}
+		if !errors.Is(err, errFakeNoContainer) {
+			t.Errorf("%s without a container = %v, want the cause to stay matchable", op.name, err)
+		}
+	}
+	if got := f.ensures.Load(); got != 0 {
+		t.Fatalf("ensures before any EnsureContainer = %d, want 0", got)
+	}
+	if _, bounded := f.lastEnsure(); bounded {
+		t.Error("lastEnsure() reports a deadline before any EnsureContainer")
+	}
+
+	want := time.Now().Add(time.Minute)
+	bounded, cancel := context.WithDeadline(ctx, want)
+	defer cancel()
+	for i := range 2 {
+		if err := f.EnsureContainer(bounded); err != nil {
+			t.Fatalf("EnsureContainer call %d: %v", i+1, err)
+		}
+	}
+	if got := f.ensures.Load(); got != 2 {
+		t.Errorf("ensures = %d, want 2", got)
+	}
+	if deadline, bounded := f.lastEnsure(); !bounded || !deadline.Equal(want) {
+		t.Errorf("lastEnsure() = %v, %t; want %v, true", deadline, bounded, want)
+	}
+	// Put runs first, so every later operation finds the key or, for
+	// Delete, removes it.
+	for _, op := range ops {
+		if err := op.call(); err != nil {
+			t.Errorf("%s after EnsureContainer = %v, want nil", op.name, err)
+		}
+	}
+
+	// The container is created empty and a repeat call leaves it as it is.
+	putString(t, f, "kept", "v")
+	if err := f.EnsureContainer(ctx); err != nil {
+		t.Fatalf("EnsureContainer over an existing container: %v", err)
+	}
+	if _, err := f.Stat(ctx, "kept"); err != nil {
+		t.Errorf("Stat after a repeat EnsureContainer = %v, want the object kept", err)
 	}
 }
 
