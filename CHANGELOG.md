@@ -33,3 +33,8 @@ only; each provider sub-module keeps its own.
   object operation outside the started window, the configured page size on a `List` with no
   limit, and the `MaxObjectSize` bound on `Put` through a reader that fails on the first byte
   past it.
+- `storagetest` — the test support package. `Fake` is an in-memory `Client` for a consumer's
+  hermetic tests, with an outage toggle, a container that `DropContainer` removes and
+  `EnsureContainer` recreates, injected `Put` failures, and observation of the calls it received.
+  `Run` is the conformance suite a provider runs against its own `Client`: it writes every key
+  under a random prefix and deletes what it wrote, so it runs against a shared container.

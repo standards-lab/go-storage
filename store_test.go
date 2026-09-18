@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/standards-lab/go-core/config"
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-storage"
+	"github.com/standards-lab/go-storage/storagetest"
 )
 
 var (
@@ -98,9 +100,9 @@ func storeOps(s *storage.Store) []struct {
 
 // wantNotReady asserts every guarded operation returns the plain ErrNotReady
 // sentinel and that the fake saw no Put or Probe as a result.
-func wantNotReady(t *testing.T, s *storage.Store, f *fake) {
+func wantNotReady(t *testing.T, s *storage.Store, f *storagetest.Fake) {
 	t.Helper()
-	puts, probes := f.puts.Load(), f.probes.Load()
+	puts, probes := f.Puts(), f.Probes()
 	for _, op := range storeOps(s) {
 		if err := op.call(); !errors.Is(err, storage.ErrNotReady) {
 			t.Errorf("%s = %v, want ErrNotReady", op.name, err)
@@ -108,21 +110,21 @@ func wantNotReady(t *testing.T, s *storage.Store, f *fake) {
 			t.Errorf("%s = %v, want the plain sentinel with nothing wrapped around it", op.name, err)
 		}
 	}
-	if got := f.puts.Load(); got != puts {
+	if got := f.Puts(); got != puts {
 		t.Errorf("puts = %d after not-ready calls, want %d", got, puts)
 	}
-	if got := f.probes.Load(); got != probes {
+	if got := f.Probes(); got != probes {
 		t.Errorf("probes = %d after not-ready calls, want %d", got, probes)
 	}
 }
 
 // wantProbeDeadline asserts the fake's most recent Probe carried a deadline
 // no further out than testTimeout from now and not already spent.
-func wantProbeDeadline(t *testing.T, f *fake) {
+func wantProbeDeadline(t *testing.T, f *storagetest.Fake) {
 	t.Helper()
-	deadline, bounded := f.lastProbe()
+	deadline, bounded := f.LastProbe()
 	if !bounded {
-		t.Fatal("lastProbe() reports no deadline, want one within the configured RequestTimeout")
+		t.Fatal("LastProbe() reports no deadline, want one within the configured RequestTimeout")
 	}
 	remaining := time.Until(deadline)
 	if remaining > testTimeout || remaining < testTimeout/2 {
@@ -138,17 +140,17 @@ func TestNew_PanicsOnNilClient(t *testing.T) {
 
 func TestNew_PanicsOnUnfinalizedConfig(t *testing.T) {
 	wantPanic(t, "storage: Config not finalized: call Finalize before New", func() {
-		storage.New(newFake(), validConfig())
+		storage.New(storagetest.NewFake(), validConfig())
 	})
 }
 
 func TestNew_PerformsNoIO(t *testing.T) {
-	f := newFake()
-	f.down.Store(true)
+	f := storagetest.NewFake()
+	f.Down.Store(true)
 
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
-	if got := f.probes.Load(); got != 0 {
+	if got := f.Probes(); got != 0 {
 		t.Errorf("probes after New = %d, want 0", got)
 	}
 	if s.Ready() {
@@ -157,7 +159,7 @@ func TestNew_PerformsNoIO(t *testing.T) {
 }
 
 func TestStore_LifecycleServiceShape(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	// The bare method values and the Store itself fill a lifecycle.Service
@@ -183,17 +185,17 @@ func TestStore_LifecycleServiceShape(t *testing.T) {
 }
 
 func TestStore_NotReadyBeforeStart(t *testing.T) {
-	f := newFake(withCapabilities(storage.Capabilities{MaxKeyLength: 17}))
+	f := storagetest.NewFake(storagetest.WithCapabilities(storage.Capabilities{MaxKeyLength: 17}))
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	wantNotReady(t, s, f)
 	if s.Ready() {
 		t.Error("Ready() = true before Start, want false")
 	}
-	if got := f.puts.Load(); got != 0 {
+	if got := f.Puts(); got != 0 {
 		t.Errorf("puts = %d, want 0", got)
 	}
-	if got := f.probes.Load(); got != 0 {
+	if got := f.Probes(); got != 0 {
 		t.Errorf("probes = %d, want 0", got)
 	}
 	// Capabilities is a static provider fact and needs no readiness.
@@ -203,26 +205,26 @@ func TestStore_NotReadyBeforeStart(t *testing.T) {
 }
 
 func TestStore_StartEnsuresThenProbesAndReports(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if got := f.ensures.Load(); got != 1 {
+	if got := f.Ensures(); got != 1 {
 		t.Errorf("ensures after Start = %d, want 1", got)
 	}
-	if got := f.probes.Load(); got != 1 {
+	if got := f.Probes(); got != 1 {
 		t.Errorf("probes after Start = %d, want 1", got)
 	}
 	wantProbeDeadline(t, f)
 	// Both calls run under the one context Start builds, so the ensure
 	// carries the probe's deadline exactly.
-	ensureDeadline, bounded := f.lastEnsure()
+	ensureDeadline, bounded := f.LastEnsure()
 	if !bounded {
-		t.Fatal("lastEnsure() reports no deadline, want the one Start built")
+		t.Fatal("LastEnsure() reports no deadline, want the one Start built")
 	}
-	if probeDeadline, _ := f.lastProbe(); !ensureDeadline.Equal(probeDeadline) {
+	if probeDeadline, _ := f.LastProbe(); !ensureDeadline.Equal(probeDeadline) {
 		t.Errorf("ensure deadline %v differs from probe deadline %v, want the same context", ensureDeadline, probeDeadline)
 	}
 	if !s.Ready() {
@@ -231,7 +233,7 @@ func TestStore_StartEnsuresThenProbesAndReports(t *testing.T) {
 }
 
 func TestStore_StartCreatesMissingContainer(t *testing.T) {
-	f := newFake(withoutContainer())
+	f := storagetest.NewFake(storagetest.WithoutContainer())
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	// The fake's Probe fails until the container exists, so a successful
@@ -239,13 +241,13 @@ func TestStore_StartCreatesMissingContainer(t *testing.T) {
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start against an empty fake: %v", err)
 	}
-	if got := f.ensures.Load(); got != 1 {
+	if got := f.Ensures(); got != 1 {
 		t.Errorf("ensures after Start = %d, want 1", got)
 	}
-	if got := f.probes.Load(); got != 1 {
+	if got := f.Probes(); got != 1 {
 		t.Errorf("probes after Start = %d, want 1", got)
 	}
-	if !f.hasContainer.Load() {
+	if !f.HasContainer() {
 		t.Error("the container does not exist after Start, want it created")
 	}
 	if !s.Ready() {
@@ -255,8 +257,8 @@ func TestStore_StartCreatesMissingContainer(t *testing.T) {
 }
 
 func TestStore_StartFailureWrapsSentinelAndCause(t *testing.T) {
-	f := newFake()
-	f.down.Store(true)
+	f := storagetest.NewFake()
+	f.Down.Store(true)
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	err := s.Start(context.Background())
@@ -266,8 +268,8 @@ func TestStore_StartFailureWrapsSentinelAndCause(t *testing.T) {
 	if !errors.Is(err, storage.ErrUnavailable) {
 		t.Errorf("errors.Is(err, ErrUnavailable) = false for %v", err)
 	}
-	if !errors.Is(err, errFakeDown) {
-		t.Errorf("errors.Is(err, errFakeDown) = false for %v, want the cause to stay matchable", err)
+	if !errors.Is(err, storagetest.ErrDown) {
+		t.Errorf("errors.Is(err, storagetest.ErrDown) = false for %v, want the cause to stay matchable", err)
 	}
 	// The fake already classifies its outage under ErrUnavailable, so Start
 	// must not stack a second copy of the sentinel onto the message.
@@ -276,10 +278,10 @@ func TestStore_StartFailureWrapsSentinelAndCause(t *testing.T) {
 	}
 	// The outage fails the ensure, which is the first step, so Start stops
 	// there.
-	if got := f.ensures.Load(); got != 1 {
+	if got := f.Ensures(); got != 1 {
 		t.Errorf("ensures after a failed Start = %d, want 1", got)
 	}
-	if got := f.probes.Load(); got != 0 {
+	if got := f.Probes(); got != 0 {
 		t.Errorf("probes after a failed ensure = %d, want 0", got)
 	}
 	if s.Ready() {
@@ -290,7 +292,7 @@ func TestStore_StartFailureWrapsSentinelAndCause(t *testing.T) {
 
 func TestStore_StartWrapsUnclassifiedEnsureError(t *testing.T) {
 	cause := errors.New("raw ensure failure")
-	f := &ensureErrClient{fake: newFake(), err: cause}
+	f := &ensureErrClient{Fake: storagetest.NewFake(), err: cause}
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	err := s.Start(context.Background())
@@ -300,13 +302,13 @@ func TestStore_StartWrapsUnclassifiedEnsureError(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Errorf("errors.Is(err, cause) = false for %v", err)
 	}
-	if got := f.probes.Load(); got != 0 {
+	if got := f.Probes(); got != 0 {
 		t.Errorf("probes after a failed ensure = %d, want 0", got)
 	}
 	if s.Ready() {
 		t.Error("Ready() = true after a failed Start, want false")
 	}
-	wantNotReady(t, s, f.fake)
+	wantNotReady(t, s, f.Fake)
 }
 
 func TestStore_StartProbeFailureAfterEnsure(t *testing.T) {
@@ -320,7 +322,7 @@ func TestStore_StartProbeFailureAfterEnsure(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &probeErrClient{fake: newFake(), err: tc.err}
+			f := &probeErrClient{Fake: storagetest.NewFake(), err: tc.err}
 			s := storage.New(f, finalizedConfig(t, 0, 0))
 
 			err := s.Start(context.Background())
@@ -334,13 +336,13 @@ func TestStore_StartProbeFailureAfterEnsure(t *testing.T) {
 				t.Errorf("error %q names ErrUnavailable %d times, want once", err, got)
 			}
 			// The ensure succeeded; only the probe failed.
-			if got := f.ensures.Load(); got != 1 {
+			if got := f.Ensures(); got != 1 {
 				t.Errorf("ensures = %d, want 1", got)
 			}
 			if s.Ready() {
 				t.Error("Ready() = true after a failed Start, want false")
 			}
-			wantNotReady(t, s, f.fake)
+			wantNotReady(t, s, f.Fake)
 		})
 	}
 }
@@ -348,7 +350,7 @@ func TestStore_StartProbeFailureAfterEnsure(t *testing.T) {
 // probeErrClient is a fake whose Probe fails with the configured error, so
 // the Start wrap path can be exercised after a successful ensure.
 type probeErrClient struct {
-	*fake
+	*storagetest.Fake
 	err error
 }
 
@@ -357,14 +359,14 @@ func (c *probeErrClient) Probe(context.Context) error { return c.err }
 // ensureErrClient is a fake whose EnsureContainer fails with the configured
 // error, which is not classified under ErrUnavailable.
 type ensureErrClient struct {
-	*fake
+	*storagetest.Fake
 	err error
 }
 
 func (c *ensureErrClient) EnsureContainer(context.Context) error { return c.err }
 
 func TestStore_EnsureContainerNeedsNoReadiness(t *testing.T) {
-	f := newFake(withoutContainer())
+	f := storagetest.NewFake(storagetest.WithoutContainer())
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 	ctx := context.Background()
 
@@ -373,13 +375,13 @@ func TestStore_EnsureContainerNeedsNoReadiness(t *testing.T) {
 	if err := s.EnsureContainer(ctx); err != nil {
 		t.Fatalf("EnsureContainer before Start: %v", err)
 	}
-	if got := f.ensures.Load(); got != 1 {
+	if got := f.Ensures(); got != 1 {
 		t.Errorf("ensures = %d, want 1", got)
 	}
-	if _, bounded := f.lastEnsure(); bounded {
+	if _, bounded := f.LastEnsure(); bounded {
 		t.Error("EnsureContainer added a deadline to a background context, want the caller's context passed through")
 	}
-	if !f.hasContainer.Load() {
+	if !f.HasContainer() {
 		t.Error("the container does not exist after EnsureContainer, want it created")
 	}
 	wantNotReady(t, s, f)
@@ -387,23 +389,23 @@ func TestStore_EnsureContainerNeedsNoReadiness(t *testing.T) {
 	if err := s.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if got := f.ensures.Load(); got != 2 {
+	if got := f.Ensures(); got != 2 {
 		t.Errorf("ensures after Start = %d, want 2", got)
 	}
 
 	// While not ready: the container disappears, Ready reports it without
 	// creating anything, and EnsureContainer recovers it.
-	f.hasContainer.Store(false)
+	f.DropContainer()
 	if s.Ready() {
 		t.Error("Ready() = true with the container gone, want false")
 	}
-	if got := f.ensures.Load(); got != 2 {
+	if got := f.Ensures(); got != 2 {
 		t.Errorf("ensures after Ready = %d, want 2 (Ready does not create)", got)
 	}
 	if err := s.EnsureContainer(ctx); err != nil {
 		t.Fatalf("EnsureContainer while not ready: %v", err)
 	}
-	if got := f.ensures.Load(); got != 3 {
+	if got := f.Ensures(); got != 3 {
 		t.Errorf("ensures = %d, want 3", got)
 	}
 	if !s.Ready() {
@@ -417,7 +419,7 @@ func TestStore_EnsureContainerNeedsNoReadiness(t *testing.T) {
 	if err := s.EnsureContainer(ctx); err != nil {
 		t.Errorf("EnsureContainer after Shutdown = %v, want nil", err)
 	}
-	if got := f.ensures.Load(); got != 4 {
+	if got := f.Ensures(); got != 4 {
 		t.Errorf("ensures = %d, want 4", got)
 	}
 	wantNotReady(t, s, f)
@@ -425,7 +427,7 @@ func TestStore_EnsureContainerNeedsNoReadiness(t *testing.T) {
 
 func TestStore_EnsureContainerReturnsProviderError(t *testing.T) {
 	cause := errors.New("provider refused to create the container")
-	f := &ensureErrClient{fake: newFake(), err: cause}
+	f := &ensureErrClient{Fake: storagetest.NewFake(), err: cause}
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	// The provider's error passes through as is, with nothing wrapped
@@ -434,10 +436,10 @@ func TestStore_EnsureContainerReturnsProviderError(t *testing.T) {
 		t.Errorf("EnsureContainer = %v, want the provider's error unchanged", err)
 	}
 
-	down := newFake()
-	down.down.Store(true)
+	down := storagetest.NewFake()
+	down.Down.Store(true)
 	err := storage.New(down, finalizedConfig(t, 0, 0)).EnsureContainer(context.Background())
-	if !errors.Is(err, storage.ErrUnavailable) || !errors.Is(err, errFakeDown) {
+	if !errors.Is(err, storage.ErrUnavailable) || !errors.Is(err, storagetest.ErrDown) {
 		t.Errorf("EnsureContainer during an outage = %v, want the fake's classified error", err)
 	}
 	if got := strings.Count(err.Error(), storage.ErrUnavailable.Error()); got != 1 {
@@ -447,7 +449,7 @@ func TestStore_EnsureContainerReturnsProviderError(t *testing.T) {
 
 func TestStore_Container(t *testing.T) {
 	cfg := finalizedConfig(t, 0, 0)
-	s := storage.New(newFake(), cfg)
+	s := storage.New(storagetest.NewFake(), cfg)
 
 	if got := s.Container(); got != cfg.Container {
 		t.Errorf("Container() = %q, want the configured %q", got, cfg.Container)
@@ -455,44 +457,44 @@ func TestStore_Container(t *testing.T) {
 }
 
 func TestStore_ReadySelfHeals(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	s := startedStore(t, f, 0, 0)
 
-	f.down.Store(true)
+	f.Down.Store(true)
 	if s.Ready() {
 		t.Error("Ready() = true during an outage, want false")
 	}
 
-	f.down.Store(false)
+	f.Down.Store(false)
 	if !s.Ready() {
 		t.Error("Ready() = false after the outage cleared, want true")
 	}
 	wantProbeDeadline(t, f)
 	// Start probed once; each Ready call is a live probe of its own.
-	if got := f.probes.Load(); got != 3 {
+	if got := f.Probes(); got != 3 {
 		t.Errorf("probes = %d, want 3 (Start and two Ready calls)", got)
 	}
 }
 
 func TestStore_ProbeUsesCallerContext(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	s := startedStore(t, f, 0, 0)
 
 	if err := s.Probe(context.Background()); err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
-	if _, bounded := f.lastProbe(); bounded {
+	if _, bounded := f.LastProbe(); bounded {
 		t.Error("Probe added a deadline to a background context, want the caller's context passed through")
 	}
 
-	f.down.Store(true)
+	f.Down.Store(true)
 	if err := s.Probe(context.Background()); !errors.Is(err, storage.ErrUnavailable) {
 		t.Errorf("Probe during an outage = %v, want ErrUnavailable", err)
 	}
 }
 
 func TestStore_ShutdownClearsReadiness(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	s := startedStore(t, f, 0, 0)
 
 	if err := s.Shutdown(context.Background()); err != nil {
@@ -506,15 +508,15 @@ func TestStore_ShutdownClearsReadiness(t *testing.T) {
 
 func TestStore_ShutdownIsSafeAtEveryPoint(t *testing.T) {
 	t.Run("before Start", func(t *testing.T) {
-		s := storage.New(newFake(), finalizedConfig(t, 0, 0))
+		s := storage.New(storagetest.NewFake(), finalizedConfig(t, 0, 0))
 		if err := s.Shutdown(context.Background()); err != nil {
 			t.Errorf("Shutdown before Start = %v, want nil", err)
 		}
 	})
 
 	t.Run("after a failed Start", func(t *testing.T) {
-		f := newFake()
-		f.down.Store(true)
+		f := storagetest.NewFake()
+		f.Down.Store(true)
 		s := storage.New(f, finalizedConfig(t, 0, 0))
 		if err := s.Start(context.Background()); err == nil {
 			t.Fatal("Start succeeded against a fake in outage")
@@ -525,7 +527,7 @@ func TestStore_ShutdownIsSafeAtEveryPoint(t *testing.T) {
 	})
 
 	t.Run("twice", func(t *testing.T) {
-		s := startedStore(t, newFake(), 0, 0)
+		s := startedStore(t, storagetest.NewFake(), 0, 0)
 		for i := range 2 {
 			if err := s.Shutdown(context.Background()); err != nil {
 				t.Errorf("Shutdown call %d = %v, want nil", i+1, err)
@@ -551,7 +553,7 @@ func TestStore_ShutdownClosesClientOnce(t *testing.T) {
 }
 
 func TestStore_ShutdownWithoutCloser(t *testing.T) {
-	s := startedStore(t, newFake(), 0, 0)
+	s := startedStore(t, storagetest.NewFake(), 0, 0)
 
 	if err := s.Shutdown(context.Background()); err != nil {
 		t.Errorf("Shutdown = %v, want nil for a Client with no Close", err)
@@ -559,7 +561,7 @@ func TestStore_ShutdownWithoutCloser(t *testing.T) {
 }
 
 func TestStore_DelegatesRoundTrip(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	s := startedStore(t, f, 0, 0)
 	ctx := context.Background()
 
@@ -571,8 +573,8 @@ func TestStore_DelegatesRoundTrip(t *testing.T) {
 	if obj.Key != "a/hello.txt" || obj.Size != 5 || obj.ContentType != "text/plain" {
 		t.Errorf("Put = %+v, want the fake's metadata for a/hello.txt", obj)
 	}
-	if gotOpts, consumed := f.lastPut(); gotOpts != opts || consumed != 5 {
-		t.Errorf("lastPut() = %+v, %d; want %+v, 5", gotOpts, consumed, opts)
+	if gotOpts, consumed := f.LastPut(); gotOpts != opts || consumed != 5 {
+		t.Errorf("LastPut() = %+v, %d; want %+v, 5", gotOpts, consumed, opts)
 	}
 
 	blob, err := s.Get(ctx, "a/hello.txt", storage.GetOptions{})
@@ -684,7 +686,7 @@ func TestStore_PutBound(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newFake()
+			f := storagetest.NewFake()
 			s := startedStore(t, f, tc.maxSize, 0)
 			ctx := context.Background()
 
@@ -700,14 +702,14 @@ func TestStore_PutBound(t *testing.T) {
 				t.Fatalf("Put: %v", err)
 			}
 
-			if got := f.puts.Load(); got != tc.wantPuts {
+			if got := f.Puts(); got != tc.wantPuts {
 				t.Errorf("puts = %d, want %d", got, tc.wantPuts)
 			}
-			if _, consumed := f.lastPut(); tc.wantConsumed >= 0 && consumed > tc.wantConsumed+1 {
+			if _, consumed := f.LastPut(); tc.wantConsumed >= 0 && consumed > tc.wantConsumed+1 {
 				t.Errorf("fake consumed %d bytes, want at most %d", consumed, tc.wantConsumed+1)
 			}
 			if tc.wantConsumed >= 0 && !tc.wantTooLarge {
-				if _, consumed := f.lastPut(); consumed != tc.wantConsumed {
+				if _, consumed := f.LastPut(); consumed != tc.wantConsumed {
 					t.Errorf("fake consumed %d bytes, want %d", consumed, tc.wantConsumed)
 				}
 			}
@@ -748,7 +750,7 @@ func TestStore_PutBoundReaderShapes(t *testing.T) {
 	}
 	for _, shape := range shapes {
 		t.Run(shape.name, func(t *testing.T) {
-			f := newFake()
+			f := storagetest.NewFake()
 			s := startedStore(t, f, bound, 0)
 			ctx := context.Background()
 
@@ -756,7 +758,7 @@ func TestStore_PutBoundReaderShapes(t *testing.T) {
 			if _, err := s.Put(ctx, "exact", shape.wrap(strings.NewReader(exact)), storage.PutOptions{}); err != nil {
 				t.Fatalf("Put at the bound: %v", err)
 			}
-			if _, consumed := f.lastPut(); consumed != bound {
+			if _, consumed := f.LastPut(); consumed != bound {
 				t.Errorf("fake consumed %d bytes at the bound, want %d", consumed, bound)
 			}
 
@@ -765,7 +767,7 @@ func TestStore_PutBoundReaderShapes(t *testing.T) {
 			if !errors.Is(err, storage.ErrTooLarge) {
 				t.Errorf("Put one byte over the bound = %v, want ErrTooLarge", err)
 			}
-			if _, consumed := f.lastPut(); consumed > bound {
+			if _, consumed := f.LastPut(); consumed > bound {
 				t.Errorf("fake consumed %d bytes over the bound, want at most %d", consumed, bound)
 			}
 			if _, err := s.Stat(ctx, "over"); !errors.Is(err, storage.ErrNotFound) {
@@ -776,7 +778,7 @@ func TestStore_PutBoundReaderShapes(t *testing.T) {
 }
 
 func TestStore_PutBoundKeepsClientCause(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	s := startedStore(t, f, 4, 0)
 
 	_, err := s.Put(context.Background(), "k", strings.NewReader("0123456789"), storage.PutOptions{})
@@ -797,7 +799,7 @@ func TestStore_PutBoundNamesBoundWhenClientErrorOmitsIt(t *testing.T) {
 	// reason still yields an error that names the bound and keeps the
 	// client's cause matchable.
 	cause := errors.New("provider closed the connection")
-	f := &lenientPutClient{fake: newFake(), err: cause}
+	f := &lenientPutClient{Fake: storagetest.NewFake(), err: cause}
 	s := startedStore(t, f, 4, 0)
 
 	_, err := s.Put(context.Background(), "k", strings.NewReader("0123456789"), storage.PutOptions{})
@@ -810,7 +812,7 @@ func TestStore_PutBoundNamesBoundWhenClientErrorOmitsIt(t *testing.T) {
 }
 
 func TestStore_PutDeclaredSizeErrorNamesBound(t *testing.T) {
-	s := startedStore(t, newFake(), 4, 0)
+	s := startedStore(t, storagetest.NewFake(), 4, 0)
 
 	_, err := s.Put(context.Background(), "k", strings.NewReader("x"), storage.PutOptions{Size: 9})
 	want := "storage object too large: declared size 9 exceeds the configured max object size (4 bytes)"
@@ -820,10 +822,10 @@ func TestStore_PutDeclaredSizeErrorNamesBound(t *testing.T) {
 }
 
 func TestStore_PutBoundDoesNotReclassifyClientFailure(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	s := startedStore(t, f, 16, 0)
 	cause := errors.New("provider rejected the write")
-	f.failPut(cause)
+	f.FailPut(cause)
 
 	_, err := s.Put(context.Background(), "k", strings.NewReader("within bound"), storage.PutOptions{})
 	if !errors.Is(err, cause) {
@@ -837,14 +839,14 @@ func TestStore_PutBoundDoesNotReclassifyClientFailure(t *testing.T) {
 func TestStore_PutBoundTripsEvenWhenClientSucceeds(t *testing.T) {
 	// A client that swallows the read error and reports success has stored a
 	// truncated object; the Store must still fail the Put.
-	f := &lenientPutClient{fake: newFake()}
+	f := &lenientPutClient{Fake: storagetest.NewFake()}
 	s := startedStore(t, f, 4, 0)
 
 	_, err := s.Put(context.Background(), "k", strings.NewReader("0123456789"), storage.PutOptions{})
 	if !errors.Is(err, storage.ErrTooLarge) {
 		t.Errorf("Put = %v, want ErrTooLarge even though the client returned nil", err)
 	}
-	if got := f.puts.Load(); got != 1 {
+	if got := f.Puts(); got != 1 {
 		t.Errorf("puts = %d, want 1", got)
 	}
 }
@@ -852,7 +854,7 @@ func TestStore_PutBoundTripsEvenWhenClientSucceeds(t *testing.T) {
 // lenientPutClient is a fake whose Put reads what it can and ignores a read
 // error. It then reports success for whatever it got, or err when one is set.
 type lenientPutClient struct {
-	*fake
+	*storagetest.Fake
 	err error
 }
 
@@ -862,7 +864,7 @@ func (c *lenientPutClient) Put(ctx context.Context, key string, body io.Reader, 
 	if c.err != nil {
 		return storage.Object{}, c.err
 	}
-	return c.fake.Put(ctx, key, &buf, opts)
+	return c.Fake.Put(ctx, key, &buf, opts)
 }
 
 func TestStore_ListLimit(t *testing.T) {
@@ -879,13 +881,13 @@ func TestStore_ListLimit(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newFake()
+			f := storagetest.NewFake()
 			s := startedStore(t, f, 0, tc.pageSize)
 
 			if _, err := s.List(context.Background(), storage.ListOptions{Prefix: "p/", Limit: tc.limit}); err != nil {
 				t.Fatalf("List: %v", err)
 			}
-			got := f.lastList()
+			got := f.LastList()
 			if got.Limit != tc.wantLimit {
 				t.Errorf("client saw Limit %d, want %d", got.Limit, tc.wantLimit)
 			}
@@ -897,7 +899,7 @@ func TestStore_ListLimit(t *testing.T) {
 }
 
 func TestStore_ListRejectsNegativeLimit(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	s := startedStore(t, f, 0, 25)
 
 	// A first valid call leaves a marker, so a rejected call is provably one
@@ -912,13 +914,13 @@ func TestStore_ListRejectsNegativeLimit(t *testing.T) {
 	if !strings.Contains(err.Error(), "-1") {
 		t.Errorf("error %q does not name the limit", err)
 	}
-	if got := f.lastList(); got.Prefix != "marker" {
+	if got := f.LastList(); got.Prefix != "marker" {
 		t.Errorf("client saw a List with Prefix %q after the rejected call, want none", got.Prefix)
 	}
 }
 
 func TestStore_CapabilitiesPassThrough(t *testing.T) {
-	f := newFake(withCapabilities(storage.Capabilities{
+	f := storagetest.NewFake(storagetest.WithCapabilities(storage.Capabilities{
 		MaxKeyLength: 1024,
 		ValidateKey: func(key string) error {
 			if strings.HasPrefix(key, "/") {
@@ -945,7 +947,7 @@ func TestStore_CapabilitiesPassThrough(t *testing.T) {
 }
 
 func TestStore_ConcurrentUse(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	s := startedStore(t, f, 64, 10)
 	ctx := context.Background()
 	const workers = 8
@@ -989,5 +991,72 @@ func TestStore_ConcurrentUse(t *testing.T) {
 
 	if s.Ready() {
 		t.Error("Ready() = true after Shutdown, want false")
+	}
+}
+
+// closingFake is a Fake that also implements io.Closer, for the Shutdown path
+// that closes a Client when it can.
+type closingFake struct {
+	*storagetest.Fake
+
+	closes   atomic.Int64
+	closeErr error
+}
+
+func newClosingFake(closeErr error) *closingFake {
+	return &closingFake{Fake: storagetest.NewFake(), closeErr: closeErr}
+}
+
+func (c *closingFake) Close() error {
+	c.closes.Add(1)
+	return c.closeErr
+}
+
+// putString stores content at key and fails the test on error.
+func putString(t *testing.T, c storage.Client, key, content string) storage.Object {
+	t.Helper()
+	obj, err := c.Put(context.Background(), key, strings.NewReader(content), storage.PutOptions{})
+	if err != nil {
+		t.Fatalf("Put(%q): %v", key, err)
+	}
+	return obj
+}
+
+// readBlob drains and closes a Get result.
+func readBlob(t *testing.T, blob storage.Blob) string {
+	t.Helper()
+	data, err := io.ReadAll(blob.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if err := blob.Body.Close(); err != nil {
+		t.Fatalf("close body: %v", err)
+	}
+	return string(data)
+}
+
+// listKeys walks a listing to its final page and returns every key seen, in
+// order, along with the number of pages it took.
+func listKeys(t *testing.T, c storage.Client, prefix string, limit int) ([]string, int) {
+	t.Helper()
+	var keys []string
+	pages := 0
+	token := ""
+	for {
+		page, err := c.List(context.Background(), storage.ListOptions{Prefix: prefix, Token: token, Limit: limit})
+		if err != nil {
+			t.Fatalf("List(page %d): %v", pages, err)
+		}
+		pages++
+		for _, obj := range page.Objects {
+			keys = append(keys, obj.Key)
+		}
+		if page.Next == "" {
+			return keys, pages
+		}
+		token = page.Next
+		if pages > 100 {
+			t.Fatal("List never returned an empty Next")
+		}
 	}
 }
