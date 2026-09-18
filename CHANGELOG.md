@@ -7,6 +7,8 @@ only; each provider sub-module keeps its own.
 
 ## [Unreleased]
 
+## [v0.1.0] - 2026-09-18
+
 ### Added
 
 - `Client` — the standard-tier interface over the five object operations Azure Blob and S3
@@ -54,3 +56,6 @@ only; each provider sub-module keeps its own.
   holds its previous bytes, content type, and ETag. Every reported ETag is asserted to be in
   entity-tag form and equal across `Put`, `Get`, `Stat`, and `List`. `Fake` enforces `Size`
   and reports a quoted ETag.
+
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.1.0...HEAD
+[v0.1.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.1.0
