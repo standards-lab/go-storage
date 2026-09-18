@@ -8,6 +8,8 @@ sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.1.0] - 2026-09-18
+
 ### Added
 
 - `New` constructs a `Client` from a finalized `storage.Config` without I/O, over the Azure SDK
@@ -47,3 +49,7 @@ sub-module only; the base module keeps its own.
   the defaults. The SDK's CPU-scaled default concurrency is never used.
 - Acceptance tests that run the `storagetest` conformance suite and a `storage.Store.Start`
   against a real service, gated on `AZUREBLOB_TEST_ENDPOINT` so they skip on the unit tier.
+- Requires `github.com/standards-lab/go-storage` v0.1.0.
+
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/azureblob/v0.1.0...HEAD
+[v0.1.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.1.0
