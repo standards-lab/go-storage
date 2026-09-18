@@ -119,16 +119,19 @@ func (s *Store) Put(ctx context.Context, key string, body io.Reader, opts PutOpt
 		return s.client.Put(ctx, key, body, opts)
 	}
 	if opts.Size > s.maxObjectSize {
-		return Object{}, fmt.Errorf("%w: declared size %d exceeds %d bytes", ErrTooLarge, opts.Size, s.maxObjectSize)
+		return Object{}, fmt.Errorf("%w: declared size %d exceeds the configured max object size (%d bytes)", ErrTooLarge, opts.Size, s.maxObjectSize)
 	}
 
-	bounded := &boundedReader{r: body, remain: s.maxObjectSize}
+	bounded := newBoundedReader(body, s.maxObjectSize)
 	obj, err := s.client.Put(ctx, key, bounded, opts)
 	if bounded.tripped.Load() {
-		if err != nil {
-			return Object{}, fmt.Errorf("%w: body exceeds %d bytes: %w", ErrTooLarge, s.maxObjectSize, err)
+		switch {
+		case err == nil:
+			err = bounded.err
+		case !errors.Is(err, bounded.err):
+			err = fmt.Errorf("%w: %w", bounded.err, err)
 		}
-		return Object{}, fmt.Errorf("%w: body exceeds %d bytes", ErrTooLarge, s.maxObjectSize)
+		return Object{}, fmt.Errorf("%w: %w", ErrTooLarge, err)
 	}
 	return obj, err
 }
@@ -190,24 +193,30 @@ func (s *Store) Capabilities() Capabilities {
 	return s.client.Capabilities()
 }
 
-// errBoundExceeded is the read error a boundedReader returns once the body
-// runs past its bound. Put translates it into [ErrTooLarge].
-var errBoundExceeded = errors.New("storage: body exceeds the configured max object size")
-
 // boundedReader lets exactly remain bytes through and fails on the first byte
 // beyond them. It differs from io.LimitedReader, which reports io.EOF at the
 // limit and so would make an oversize body look like a complete short one.
-// tripped is atomic so Put can read it after the provider returns even if
-// the provider's reads ran on another goroutine.
+// err is the read error it returns once the body runs past the bound, and
+// Put wraps it under [ErrTooLarge]. tripped is atomic so Put can read it after
+// the provider returns even if the provider's reads ran on another goroutine.
 type boundedReader struct {
 	r       io.Reader
 	remain  int64
+	err     error
 	tripped atomic.Bool
+}
+
+func newBoundedReader(r io.Reader, bound int64) *boundedReader {
+	return &boundedReader{
+		r:      r,
+		remain: bound,
+		err:    fmt.Errorf("body exceeds the configured max object size (%d bytes)", bound),
+	}
 }
 
 func (b *boundedReader) Read(p []byte) (int, error) {
 	if b.tripped.Load() {
-		return 0, errBoundExceeded
+		return 0, b.err
 	}
 	if b.remain <= 0 {
 		// The bound is spent. One more byte from the source means the body
@@ -216,7 +225,7 @@ func (b *boundedReader) Read(p []byte) (int, error) {
 		n, err := b.r.Read(probe[:])
 		if n > 0 {
 			b.tripped.Store(true)
-			return 0, errBoundExceeded
+			return 0, b.err
 		}
 		return 0, err
 	}

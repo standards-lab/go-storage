@@ -600,9 +600,38 @@ func TestStore_PutBoundKeepsClientCause(t *testing.T) {
 		t.Fatalf("Put = %v, want ErrTooLarge", err)
 	}
 	// The fake wraps the body's read error with its own prefix, and Put
-	// wraps that under the sentinel, so the provider's message survives.
-	if !strings.Contains(err.Error(), "fake put") {
-		t.Errorf("error %q does not carry the client's error", err)
+	// wraps that under the sentinel, so the provider's message survives and
+	// the bound appears once.
+	want := "storage object too large: fake put: body exceeds the configured max object size (4 bytes)"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
+}
+
+func TestStore_PutBoundNamesBoundWhenClientErrorOmitsIt(t *testing.T) {
+	// A client that swallows the read error and then fails for another
+	// reason still yields an error that names the bound and keeps the
+	// client's cause matchable.
+	cause := errors.New("provider closed the connection")
+	f := &lenientPutClient{fake: newFake(), err: cause}
+	s := startedStore(t, f, 4, 0)
+
+	_, err := s.Put(context.Background(), "k", strings.NewReader("0123456789"), storage.PutOptions{})
+	if !errors.Is(err, storage.ErrTooLarge) || !errors.Is(err, cause) {
+		t.Fatalf("Put = %v, want ErrTooLarge with the client's cause", err)
+	}
+	if !strings.Contains(err.Error(), "(4 bytes)") {
+		t.Errorf("error %q does not name the bound", err)
+	}
+}
+
+func TestStore_PutDeclaredSizeErrorNamesBound(t *testing.T) {
+	s := startedStore(t, newFake(), 4, 0)
+
+	_, err := s.Put(context.Background(), "k", strings.NewReader("x"), storage.PutOptions{Size: 9})
+	want := "storage object too large: declared size 9 exceeds the configured max object size (4 bytes)"
+	if err == nil || err.Error() != want {
+		t.Errorf("error = %v, want %q", err, want)
 	}
 }
 
@@ -636,15 +665,19 @@ func TestStore_PutBoundTripsEvenWhenClientSucceeds(t *testing.T) {
 	}
 }
 
-// lenientPutClient is a fake whose Put reads what it can, ignores a read
-// error, and reports success for whatever it got.
+// lenientPutClient is a fake whose Put reads what it can and ignores a read
+// error. It then reports success for whatever it got, or err when one is set.
 type lenientPutClient struct {
 	*fake
+	err error
 }
 
 func (c *lenientPutClient) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
 	var buf bytes.Buffer
 	_, _ = io.Copy(&buf, body)
+	if c.err != nil {
+		return storage.Object{}, c.err
+	}
 	return c.fake.Put(ctx, key, &buf, opts)
 }
 
