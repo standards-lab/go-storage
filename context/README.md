@@ -18,7 +18,24 @@ The built packages are authoritative through their code and `doc.go`. Detail for
 is added when it is about to be built.
 
 - **Sentinels and the `Client` interface** — the four error sentinels and the standard-tier
-  types and interface. Not yet built.
+  types and interface. Built. `Client` carries `Capabilities()` so every provider declares its
+  key constraints and a consumer reaches them through `Store`; the strategy record's first draft
+  showed `Capabilities` only as a standalone type. `GetOptions` is empty on purpose, with a byte
+  range as its anticipated first field. `MaxKeyLength` states no unit, because Azure and S3 may
+  measure a key differently, so each provider's `doc.go` states its own.
 - **`Config`** — the container, endpoint, credentials, size bound, page size, and probe timeout,
-  on `go-core`'s Merge-and-Finalize contract. Not yet built.
-- **`Store`** — the lifecycle wrapper implementing `Client`. Not yet built.
+  on `go-core`'s Merge-and-Finalize contract. Built. `MaxObjectSize` and `ListPageSize` are plain
+  values where 0 means unset, so an overlay file cannot lift a bound back to unbounded and the
+  environment override can. `RequestTimeout` is the only pointer, so `Finalize` can tell an
+  absent value from a configured one.
+- **`Store`** — the lifecycle wrapper implementing `Client`. Built. Two cautions carry to the
+  provider tasks. A provider that trusts `PutOptions.Size` and reads exactly that many bytes
+  never trips the bound on a longer body; it stores at most `Size` bytes, so the bound holds, but
+  it truncates silently, and the adapter should read to EOF or document that `Size` caps what it
+  stores. With a bound configured, every `Put` body arrives wrapped and non-seekable, so a
+  provider that needs a seekable body to sign a request (the S3 case) must sign by the declared
+  length.
+- **The in-memory fake** — `fake_test.go`, in the external test package, wrapped by `Store`'s
+  tests. Built. It stays a test file because nothing in it is API. Publishing it as `storagetest`
+  with a conformance suite for `Client` implementations waits for the `azureblob` provider,
+  when a second test package needs it.

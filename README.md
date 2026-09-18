@@ -17,10 +17,17 @@ the standard's principles it enhances are stated below. Its repository-level pri
 
 - The base module depends on the standard library and `go-core` alone. A provider's SDK lives in
   that provider's own sub-module, and the base module never imports it.
+- Limits are application policy. `MaxObjectSize` and `ListPageSize` have no default, and the
+  application supplies them; the one default, `RequestTimeout`, bounds only the probes `Store`
+  makes on its own behalf.
+- Storage gates readiness: `Store` registers with the process lifecycle through a `Start`, a
+  `Shutdown`, and a `Ready` check that probes the provider live.
 
 ## Packages
 
-- `storage` (the base module's root package) — under construction.
+- `storage` (the base module's root package) — `Client`, the standard-tier interface, with
+  `Capabilities` and the error sentinels; `Config`, on go-core's Merge-and-Finalize contract;
+  and `Store`, the lifecycle wrapper that implements `Client` and enforces the size bound.
 
 ## Development
 
