@@ -144,6 +144,12 @@ func (c *Config) applyEnv() error {
 	return config.SetDurationFromEnv(&c.RequestTimeout, c.Env.RequestTimeout)
 }
 
+// finalized reports whether Finalize ran. RequestTimeout is the one pointer
+// Finalize defaults, so its presence is the evidence.
+func (c *Config) finalized() bool {
+	return c.RequestTimeout != nil
+}
+
 func (c *Config) validate() error {
 	if c.Container == "" {
 		return errors.New("storage container required")
