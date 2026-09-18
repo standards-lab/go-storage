@@ -1,287 +1,20 @@
-package storage_test
+package storagetest_test
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/standards-lab/go-storage"
+	"github.com/standards-lab/go-storage/storagetest"
 )
 
-var (
-	_ storage.Client = (*fake)(nil)
-	_ storage.Client = (*closingFake)(nil)
-	_ io.Closer      = (*closingFake)(nil)
-)
-
-// errFakeDown is the cause the fake wraps under ErrUnavailable while its
-// outage toggle is set.
-var errFakeDown = errors.New("fake: connection refused")
-
-// errFakeMissing is the cause the fake wraps under ErrNotFound for a key it
-// does not hold.
-var errFakeMissing = errors.New("fake: no such key")
-
-// fake is an in-memory storage.Client. It honors the Client contract so the
-// Store tests can wrap it, and it records what it received so those tests can
-// assert what Store passed through. Its outage toggle makes every method,
-// Probe included, fail with ErrUnavailable until the toggle is cleared.
-type fake struct {
-	// down is the outage toggle. Every method consults it on entry.
-	down atomic.Bool
-
-	// puts counts Put calls, whether or not they succeeded.
-	puts atomic.Int64
-
-	// probes counts Probe calls, whether or not they succeeded.
-	probes atomic.Int64
-
-	now      func() time.Time
-	pageSize int
-	caps     storage.Capabilities
-
-	mu      sync.Mutex
-	objects map[string]fakeObject
-
-	// putErr, when set, fails every Put after the body has been fully read.
-	putErr error
-
-	lastPutOpts     storage.PutOptions
-	lastPutConsumed int64
-
-	lastProbeDeadline time.Time
-	lastProbeBounded  bool
-
-	lastListOpts storage.ListOptions
-}
-
-type fakeObject struct {
-	meta storage.Object
-	data []byte
-}
-
-type fakeOption func(*fake)
-
-// withClock supplies the time stamped on every Put as ModifiedAt.
-func withClock(now func() time.Time) fakeOption {
-	return func(f *fake) { f.now = now }
-}
-
-// withPageSize sets the page size List uses when Limit is 0.
-func withPageSize(n int) fakeOption {
-	return func(f *fake) { f.pageSize = n }
-}
-
-// withCapabilities sets what Capabilities returns.
-func withCapabilities(c storage.Capabilities) fakeOption {
-	return func(f *fake) { f.caps = c }
-}
-
-func newFake(opts ...fakeOption) *fake {
-	f := &fake{
-		now:      time.Now,
-		pageSize: 3,
-		objects:  make(map[string]fakeObject),
-	}
-	for _, opt := range opts {
-		opt(f)
-	}
-	return f
-}
-
-// failPut sets the error every subsequent Put returns after it has read its
-// body. A nil err restores normal Puts.
-func (f *fake) failPut(err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.putErr = err
-}
-
-// lastPut reports the options of the most recent Put and how many body bytes
-// it read.
-func (f *fake) lastPut() (storage.PutOptions, int64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.lastPutOpts, f.lastPutConsumed
-}
-
-// lastProbe reports the deadline of the context the most recent Probe
-// received, and whether that context carried one.
-func (f *fake) lastProbe() (time.Time, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.lastProbeDeadline, f.lastProbeBounded
-}
-
-// lastList reports the options of the most recent List call.
-func (f *fake) lastList() storage.ListOptions {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.lastListOpts
-}
-
-func (f *fake) unavailable() error {
-	return fmt.Errorf("%w: %w", storage.ErrUnavailable, errFakeDown)
-}
-
-func (f *fake) Put(_ context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
-	f.puts.Add(1)
-	if f.down.Load() {
-		return storage.Object{}, f.unavailable()
-	}
-
-	data, readErr := io.ReadAll(body)
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.lastPutOpts = opts
-	f.lastPutConsumed = int64(len(data))
-
-	if readErr != nil {
-		return storage.Object{}, fmt.Errorf("fake put: %w", readErr)
-	}
-	if f.putErr != nil {
-		return storage.Object{}, fmt.Errorf("fake put: %w", f.putErr)
-	}
-
-	sum := sha256.Sum256(data)
-	obj := fakeObject{
-		meta: storage.Object{
-			Key:         key,
-			Size:        int64(len(data)),
-			ContentType: opts.ContentType,
-			ETag:        hex.EncodeToString(sum[:]),
-			ModifiedAt:  f.now(),
-		},
-		data: data,
-	}
-	f.objects[key] = obj
-	return obj.meta, nil
-}
-
-func (f *fake) Get(_ context.Context, key string, _ storage.GetOptions) (storage.Blob, error) {
-	if f.down.Load() {
-		return storage.Blob{}, f.unavailable()
-	}
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	obj, ok := f.objects[key]
-	if !ok {
-		return storage.Blob{}, fmt.Errorf("%w: %w", storage.ErrNotFound, errFakeMissing)
-	}
-	return storage.Blob{
-		Object: obj.meta,
-		Body:   io.NopCloser(bytes.NewReader(bytes.Clone(obj.data))),
-	}, nil
-}
-
-func (f *fake) Stat(_ context.Context, key string) (storage.Object, error) {
-	if f.down.Load() {
-		return storage.Object{}, f.unavailable()
-	}
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	obj, ok := f.objects[key]
-	if !ok {
-		return storage.Object{}, fmt.Errorf("%w: %w", storage.ErrNotFound, errFakeMissing)
-	}
-	return obj.meta, nil
-}
-
-func (f *fake) Delete(_ context.Context, key string) error {
-	if f.down.Load() {
-		return f.unavailable()
-	}
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	delete(f.objects, key)
-	return nil
-}
-
-// List pages in key order. The continuation token is the last key of the
-// previous page, so a page starts at the first key after it.
-func (f *fake) List(_ context.Context, opts storage.ListOptions) (storage.Page, error) {
-	if f.down.Load() {
-		return storage.Page{}, f.unavailable()
-	}
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.lastListOpts = opts
-
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = f.pageSize
-	}
-
-	keys := make([]string, 0, len(f.objects))
-	for key := range f.objects {
-		if strings.HasPrefix(key, opts.Prefix) && key > opts.Token {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-
-	var page storage.Page
-	for i, key := range keys {
-		if i == limit {
-			page.Next = keys[i-1]
-			break
-		}
-		page.Objects = append(page.Objects, f.objects[key].meta)
-	}
-	return page, nil
-}
-
-func (f *fake) Probe(ctx context.Context) error {
-	f.probes.Add(1)
-
-	deadline, bounded := ctx.Deadline()
-	f.mu.Lock()
-	f.lastProbeDeadline = deadline
-	f.lastProbeBounded = bounded
-	f.mu.Unlock()
-
-	if f.down.Load() {
-		return f.unavailable()
-	}
-	return nil
-}
-
-func (f *fake) Capabilities() storage.Capabilities {
-	return f.caps
-}
-
-// closingFake is a fake that also implements io.Closer, for the Store
-// Shutdown path that closes a Client when it can.
-type closingFake struct {
-	*fake
-
-	closes   atomic.Int64
-	closeErr error
-}
-
-func newClosingFake(closeErr error, opts ...fakeOption) *closingFake {
-	return &closingFake{fake: newFake(opts...), closeErr: closeErr}
-}
-
-func (c *closingFake) Close() error {
-	c.closes.Add(1)
-	return c.closeErr
-}
+var _ storage.Client = (*storagetest.Fake)(nil)
 
 // putString stores content at key and fails the test on error.
 func putString(t *testing.T, c storage.Client, key, content string) storage.Object {
@@ -339,7 +72,7 @@ func (r errReader) Read([]byte) (int, error) { return 0, r.err }
 
 func TestFake_PutGetRoundTrip(t *testing.T) {
 	stamp := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
-	f := newFake(withClock(func() time.Time { return stamp }))
+	f := storagetest.NewFake(storagetest.WithClock(func() time.Time { return stamp }))
 	ctx := context.Background()
 
 	obj, err := f.Put(ctx, "a/hello.txt", strings.NewReader("hello"), storage.PutOptions{ContentType: "text/plain"})
@@ -383,7 +116,7 @@ func TestFake_PutGetRoundTrip(t *testing.T) {
 }
 
 func TestFake_ETagFollowsContent(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 
 	same1 := putString(t, f, "one", "content")
 	same2 := putString(t, f, "two", "content")
@@ -398,7 +131,7 @@ func TestFake_ETagFollowsContent(t *testing.T) {
 }
 
 func TestFake_PutReplaces(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 
 	first := putString(t, f, "k", "first")
 	second := putString(t, f, "k", "second value")
@@ -422,7 +155,7 @@ func TestFake_PutReplaces(t *testing.T) {
 }
 
 func TestFake_MissingKey(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	ctx := context.Background()
 
 	tests := []struct {
@@ -444,15 +177,15 @@ func TestFake_MissingKey(t *testing.T) {
 			if !errors.Is(err, storage.ErrNotFound) {
 				t.Errorf("errors.Is(err, ErrNotFound) = false for %v", err)
 			}
-			if !errors.Is(err, errFakeMissing) {
-				t.Errorf("errors.Is(err, errFakeMissing) = false for %v, want the cause to stay matchable", err)
+			if !errors.Is(err, storagetest.ErrNoSuchKey) {
+				t.Errorf("errors.Is(err, storagetest.ErrNoSuchKey) = false for %v, want the cause to stay matchable", err)
 			}
 		})
 	}
 }
 
 func TestFake_DeleteIdempotent(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	ctx := context.Background()
 
 	if err := f.Delete(ctx, "never-stored"); err != nil {
@@ -472,7 +205,7 @@ func TestFake_DeleteIdempotent(t *testing.T) {
 }
 
 func TestFake_ListPrefix(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	for _, key := range []string{"b/2", "a/1", "b/1", "c/1", "a/2"} {
 		putString(t, f, key, key)
 	}
@@ -497,7 +230,7 @@ func TestFake_ListPrefix(t *testing.T) {
 }
 
 func TestFake_ListPagesToTheEnd(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	want := []string{"k1", "k2", "k3", "k4", "k5"}
 	for _, key := range want {
 		putString(t, f, key, key)
@@ -520,7 +253,7 @@ func TestFake_ListPagesToTheEnd(t *testing.T) {
 }
 
 func TestFake_ListDefaultPageSize(t *testing.T) {
-	f := newFake(withPageSize(2))
+	f := storagetest.NewFake(storagetest.WithPageSize(2))
 	for _, key := range []string{"k1", "k2", "k3"} {
 		putString(t, f, key, key)
 	}
@@ -543,15 +276,153 @@ func TestFake_ListDefaultPageSize(t *testing.T) {
 	if len(page.Objects) != 1 || page.Next != "" {
 		t.Errorf("final page = %+v, want one object and an empty Next", page)
 	}
-	if got := f.lastList(); got.Prefix != "k" || got.Limit != 7 || got.Token == "" {
-		t.Errorf("lastList() = %+v, want the options of the final call", got)
+	if got := f.LastList(); got.Prefix != "k" || got.Limit != 7 || got.Token == "" {
+		t.Errorf("LastList() = %+v, want the options of the final call", got)
 	}
 }
 
 func TestFake_OutageToggle(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	ctx := context.Background()
 	putString(t, f, "k", "v")
+
+	ops := []struct {
+		name string
+		call func() error
+	}{
+		{"Put", func() error {
+			_, err := f.Put(ctx, "k", strings.NewReader("v"), storage.PutOptions{})
+			return err
+		}},
+		{"Get", func() error {
+			_, err := f.Get(ctx, "k", storage.GetOptions{})
+			return err
+		}},
+		{"Stat", func() error {
+			_, err := f.Stat(ctx, "k")
+			return err
+		}},
+		{"Delete", func() error { return f.Delete(ctx, "k") }},
+		{"List", func() error {
+			_, err := f.List(ctx, storage.ListOptions{})
+			return err
+		}},
+		{"EnsureContainer", func() error { return f.EnsureContainer(ctx) }},
+		{"Probe", func() error { return f.Probe(ctx) }},
+	}
+
+	f.Down.Store(true)
+	for _, op := range ops {
+		err := op.call()
+		if !errors.Is(err, storage.ErrUnavailable) {
+			t.Errorf("%s during outage = %v, want ErrUnavailable", op.name, err)
+		}
+		if !errors.Is(err, storagetest.ErrDown) {
+			t.Errorf("%s during outage = %v, want the cause to stay matchable", op.name, err)
+		}
+	}
+
+	f.Down.Store(false)
+	for _, op := range ops {
+		if err := op.call(); err != nil {
+			t.Errorf("%s after the outage = %v, want nil", op.name, err)
+		}
+	}
+}
+
+func TestFake_PutBodyReadFails(t *testing.T) {
+	f := storagetest.NewFake()
+	cause := errors.New("stream broke")
+
+	_, err := f.Put(context.Background(), "k", errReader{err: cause}, storage.PutOptions{})
+	if !errors.Is(err, cause) {
+		t.Fatalf("Put = %v, want it to wrap the body's read error", err)
+	}
+	if _, err := f.Stat(context.Background(), "k"); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("Stat after a failed Put = %v, want ErrNotFound", err)
+	}
+}
+
+func TestFake_PutRecordsCall(t *testing.T) {
+	f := storagetest.NewFake()
+
+	if got := f.Puts(); got != 0 {
+		t.Fatalf("puts before any Put = %d, want 0", got)
+	}
+
+	opts := storage.PutOptions{ContentType: "application/json", Size: 7}
+	if _, err := f.Put(context.Background(), "k", strings.NewReader("1234567"), opts); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	if got := f.Puts(); got != 1 {
+		t.Errorf("puts = %d, want 1", got)
+	}
+	gotOpts, consumed := f.LastPut()
+	if gotOpts != opts {
+		t.Errorf("LastPut() opts = %+v, want %+v", gotOpts, opts)
+	}
+	if consumed != 7 {
+		t.Errorf("LastPut() consumed = %d, want 7", consumed)
+	}
+}
+
+func TestFake_PutInjectedFailure(t *testing.T) {
+	f := storagetest.NewFake()
+	cause := errors.New("provider rejected the write")
+	f.FailPut(cause)
+
+	_, err := f.Put(context.Background(), "k", strings.NewReader("abc"), storage.PutOptions{})
+	if !errors.Is(err, cause) {
+		t.Fatalf("Put = %v, want the injected failure", err)
+	}
+	// The failure fires after the body has been read, which is when a real
+	// provider learns the outcome of its request.
+	if _, consumed := f.LastPut(); consumed != 3 {
+		t.Errorf("consumed = %d, want the whole body read before the failure", consumed)
+	}
+	if _, err := f.Stat(context.Background(), "k"); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("Stat after the failed Put = %v, want ErrNotFound", err)
+	}
+
+	f.FailPut(nil)
+	putString(t, f, "k", "abc")
+}
+
+func TestFake_ProbeRecordsDeadline(t *testing.T) {
+	f := storagetest.NewFake()
+
+	if err := f.Probe(context.Background()); err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if got := f.Probes(); got != 1 {
+		t.Errorf("probes = %d, want 1", got)
+	}
+	if _, bounded := f.LastProbe(); bounded {
+		t.Error("LastProbe() reports a deadline for a background context")
+	}
+
+	want := time.Now().Add(time.Minute)
+	ctx, cancel := context.WithDeadline(context.Background(), want)
+	defer cancel()
+	if err := f.Probe(ctx); err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if got := f.Probes(); got != 2 {
+		t.Errorf("probes = %d, want 2", got)
+	}
+	deadline, bounded := f.LastProbe()
+	if !bounded {
+		t.Fatal("LastProbe() reports no deadline for a bounded context")
+	}
+	if !deadline.Equal(want) {
+		t.Errorf("LastProbe() deadline = %v, want %v", deadline, want)
+	}
+}
+
+func TestFake_EnsureContainerCreatesOnce(t *testing.T) {
+	f := storagetest.NewFake(storagetest.WithoutContainer())
+	ctx := context.Background()
 
 	ops := []struct {
 		name string
@@ -577,125 +448,81 @@ func TestFake_OutageToggle(t *testing.T) {
 		{"Probe", func() error { return f.Probe(ctx) }},
 	}
 
-	f.down.Store(true)
 	for _, op := range ops {
 		err := op.call()
-		if !errors.Is(err, storage.ErrUnavailable) {
-			t.Errorf("%s during outage = %v, want ErrUnavailable", op.name, err)
+		if !errors.Is(err, storage.ErrNotFound) {
+			t.Errorf("%s without a container = %v, want ErrNotFound", op.name, err)
 		}
-		if !errors.Is(err, errFakeDown) {
-			t.Errorf("%s during outage = %v, want the cause to stay matchable", op.name, err)
-		}
-	}
-
-	f.down.Store(false)
-	for _, op := range ops {
-		if err := op.call(); err != nil {
-			t.Errorf("%s after the outage = %v, want nil", op.name, err)
+		if !errors.Is(err, storagetest.ErrNoSuchContainer) {
+			t.Errorf("%s without a container = %v, want the cause to stay matchable", op.name, err)
 		}
 	}
-}
-
-func TestFake_PutBodyReadFails(t *testing.T) {
-	f := newFake()
-	cause := errors.New("stream broke")
-
-	_, err := f.Put(context.Background(), "k", errReader{err: cause}, storage.PutOptions{})
-	if !errors.Is(err, cause) {
-		t.Fatalf("Put = %v, want it to wrap the body's read error", err)
+	if got := f.Ensures(); got != 0 {
+		t.Fatalf("ensures before any EnsureContainer = %d, want 0", got)
 	}
-	if _, err := f.Stat(context.Background(), "k"); !errors.Is(err, storage.ErrNotFound) {
-		t.Errorf("Stat after a failed Put = %v, want ErrNotFound", err)
-	}
-}
-
-func TestFake_PutRecordsCall(t *testing.T) {
-	f := newFake()
-
-	if got := f.puts.Load(); got != 0 {
-		t.Fatalf("puts before any Put = %d, want 0", got)
-	}
-
-	opts := storage.PutOptions{ContentType: "application/json", Size: 7}
-	if _, err := f.Put(context.Background(), "k", strings.NewReader("1234567"), opts); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-
-	if got := f.puts.Load(); got != 1 {
-		t.Errorf("puts = %d, want 1", got)
-	}
-	gotOpts, consumed := f.lastPut()
-	if gotOpts != opts {
-		t.Errorf("lastPut() opts = %+v, want %+v", gotOpts, opts)
-	}
-	if consumed != 7 {
-		t.Errorf("lastPut() consumed = %d, want 7", consumed)
-	}
-}
-
-func TestFake_PutInjectedFailure(t *testing.T) {
-	f := newFake()
-	cause := errors.New("provider rejected the write")
-	f.failPut(cause)
-
-	_, err := f.Put(context.Background(), "k", strings.NewReader("abc"), storage.PutOptions{})
-	if !errors.Is(err, cause) {
-		t.Fatalf("Put = %v, want the injected failure", err)
-	}
-	// The failure fires after the body has been read, which is when a real
-	// provider learns the outcome of its request.
-	if _, consumed := f.lastPut(); consumed != 3 {
-		t.Errorf("consumed = %d, want the whole body read before the failure", consumed)
-	}
-	if _, err := f.Stat(context.Background(), "k"); !errors.Is(err, storage.ErrNotFound) {
-		t.Errorf("Stat after the failed Put = %v, want ErrNotFound", err)
-	}
-
-	f.failPut(nil)
-	putString(t, f, "k", "abc")
-}
-
-func TestFake_ProbeRecordsDeadline(t *testing.T) {
-	f := newFake()
-
-	if err := f.Probe(context.Background()); err != nil {
-		t.Fatalf("Probe: %v", err)
-	}
-	if got := f.probes.Load(); got != 1 {
-		t.Errorf("probes = %d, want 1", got)
-	}
-	if _, bounded := f.lastProbe(); bounded {
-		t.Error("lastProbe() reports a deadline for a background context")
+	if _, bounded := f.LastEnsure(); bounded {
+		t.Error("LastEnsure() reports a deadline before any EnsureContainer")
 	}
 
 	want := time.Now().Add(time.Minute)
-	ctx, cancel := context.WithDeadline(context.Background(), want)
+	bounded, cancel := context.WithDeadline(ctx, want)
 	defer cancel()
-	if err := f.Probe(ctx); err != nil {
-		t.Fatalf("Probe: %v", err)
+	for i := range 2 {
+		if err := f.EnsureContainer(bounded); err != nil {
+			t.Fatalf("EnsureContainer call %d: %v", i+1, err)
+		}
 	}
-	if got := f.probes.Load(); got != 2 {
-		t.Errorf("probes = %d, want 2", got)
+	if got := f.Ensures(); got != 2 {
+		t.Errorf("ensures = %d, want 2", got)
 	}
-	deadline, bounded := f.lastProbe()
-	if !bounded {
-		t.Fatal("lastProbe() reports no deadline for a bounded context")
+	if deadline, bounded := f.LastEnsure(); !bounded || !deadline.Equal(want) {
+		t.Errorf("LastEnsure() = %v, %t; want %v, true", deadline, bounded, want)
 	}
-	if !deadline.Equal(want) {
-		t.Errorf("lastProbe() deadline = %v, want %v", deadline, want)
+	// Put runs first, so every later operation finds the key or, for
+	// Delete, removes it.
+	for _, op := range ops {
+		if err := op.call(); err != nil {
+			t.Errorf("%s after EnsureContainer = %v, want nil", op.name, err)
+		}
+	}
+
+	// The container is created empty and a repeat call leaves it as it is.
+	putString(t, f, "kept", "v")
+	if err := f.EnsureContainer(ctx); err != nil {
+		t.Fatalf("EnsureContainer over an existing container: %v", err)
+	}
+	if _, err := f.Stat(ctx, "kept"); err != nil {
+		t.Errorf("Stat after a repeat EnsureContainer = %v, want the object kept", err)
 	}
 }
 
 func TestFake_Capabilities(t *testing.T) {
-	if got := newFake().Capabilities(); got.MaxKeyLength != 0 || got.ValidateKey != nil {
-		t.Errorf("Capabilities() of a plain fake = %+v, want the zero value", got)
+	got := storagetest.NewFake().Capabilities()
+	if got.MaxKeyLength != storagetest.DefaultMaxKeyLength {
+		t.Errorf("MaxKeyLength of a plain fake = %d, want DefaultMaxKeyLength %d", got.MaxKeyLength, storagetest.DefaultMaxKeyLength)
+	}
+	if got.ValidateKey == nil {
+		t.Fatal("ValidateKey of a plain fake = nil, want the default")
+	}
+	if err := got.ValidateKey("a/b.txt"); err != nil {
+		t.Errorf("ValidateKey(a/b.txt) = %v, want nil", err)
+	}
+	if err := got.ValidateKey(""); err == nil {
+		t.Error("ValidateKey of an empty key = nil, want an error")
+	}
+	// The limit counts runes, so a multi-byte key at the limit passes.
+	if err := got.ValidateKey(strings.Repeat("\u00e9", storagetest.DefaultMaxKeyLength)); err != nil {
+		t.Errorf("ValidateKey of a key at the limit = %v, want nil", err)
+	}
+	if err := got.ValidateKey(strings.Repeat("a", storagetest.DefaultMaxKeyLength+1)); err == nil {
+		t.Error("ValidateKey of a key past the limit = nil, want an error")
 	}
 
-	f := newFake(withCapabilities(storage.Capabilities{
+	f := storagetest.NewFake(storagetest.WithCapabilities(storage.Capabilities{
 		MaxKeyLength: 42,
 		ValidateKey:  func(string) error { return errors.New("no keys accepted") },
 	}))
-	got := f.Capabilities()
+	got = f.Capabilities()
 	if got.MaxKeyLength != 42 {
 		t.Errorf("MaxKeyLength = %d, want 42", got.MaxKeyLength)
 	}
@@ -704,29 +531,39 @@ func TestFake_Capabilities(t *testing.T) {
 	}
 }
 
-func TestFake_ClosingFake(t *testing.T) {
-	c := newClosingFake(nil, withPageSize(1))
-	putString(t, c, "k", "v")
-
-	if err := c.Close(); err != nil {
-		t.Errorf("Close = %v, want nil", err)
-	}
-	if got := c.closes.Load(); got != 1 {
-		t.Errorf("closes = %d, want 1", got)
-	}
-	if _, pages := listKeys(t, c, "", 0); pages != 1 {
-		t.Errorf("pages = %d, want the embedded fake's options to apply", pages)
+func TestFake_DropContainer(t *testing.T) {
+	f := storagetest.NewFake()
+	ctx := context.Background()
+	putString(t, f, "k", "v")
+	if !f.HasContainer() {
+		t.Fatal("HasContainer() = false for a plain fake, want true")
 	}
 
-	cause := errors.New("close failed")
-	failing := newClosingFake(cause)
-	if err := failing.Close(); !errors.Is(err, cause) {
-		t.Errorf("Close = %v, want the configured error", err)
+	f.DropContainer()
+	if f.HasContainer() {
+		t.Error("HasContainer() = true after DropContainer, want false")
+	}
+	if err := f.Probe(ctx); !errors.Is(err, storage.ErrNotFound) || !errors.Is(err, storagetest.ErrNoSuchContainer) {
+		t.Errorf("Probe after DropContainer = %v, want ErrNotFound wrapping ErrNoSuchContainer", err)
+	}
+
+	// The container comes back empty: the drop took its objects with it.
+	if err := f.EnsureContainer(ctx); err != nil {
+		t.Fatalf("EnsureContainer after DropContainer: %v", err)
+	}
+	if !f.HasContainer() {
+		t.Error("HasContainer() = false after EnsureContainer, want true")
+	}
+	if _, err := f.Stat(ctx, "k"); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("Stat after the container was dropped and recreated = %v, want ErrNotFound", err)
+	}
+	if keys, _ := listKeys(t, f, "", 0); len(keys) != 0 {
+		t.Errorf("List after the container was recreated = %v, want no keys", keys)
 	}
 }
 
 func TestFake_ConcurrentPutGet(t *testing.T) {
-	f := newFake()
+	f := storagetest.NewFake()
 	ctx := context.Background()
 	const workers = 8
 	const rounds = 50

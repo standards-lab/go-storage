@@ -51,10 +51,10 @@ type Config struct {
 	// Limit. 0 means the provider's own page size.
 	ListPageSize int `json:"list_page_size"`
 
-	// RequestTimeout bounds the readiness probe [Store] makes on its own
-	// behalf in Start and Ready. It defaults to 10 seconds. The object
-	// operations take their timeouts from the caller's context and the
-	// provider's transport.
+	// RequestTimeout bounds the calls [Store] makes on its own behalf: the
+	// container check and probe in Start, together, and the probe in Ready.
+	// It defaults to 10 seconds. The object operations take their timeouts
+	// from the caller's context and the provider's transport.
 	RequestTimeout *config.Duration `json:"request_timeout"`
 
 	Env Env `json:"-"`

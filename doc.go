@@ -5,17 +5,23 @@
 // library and go-core's config package alone. A provider implements [Client]
 // over its own SDK in a separate sub-module, so a consumer imports its
 // provider once, at the composition root, and the base module never imports
-// a provider's SDK. No provider has been released yet.
+// a provider's SDK. The azureblob sub-module is the Azure Blob provider.
 //
 // # The standard tier
 //
 // [Client] has five object operations (Put, Get, Stat, Delete, and List) plus
-// Probe and Capabilities. It offers no conditional writes and no object
-// metadata beyond ContentType, so the owning database row remains the
-// authority for an object's metadata and for concurrent updates. A feature
-// that only some providers offer, such as leases, access tiers, and presigned
-// URLs, is reached through the provider's own handle and never through
-// [Client].
+// EnsureContainer, Probe, and Capabilities. EnsureContainer creates the
+// configured container and succeeds when it already exists; it never deletes
+// or reconfigures one. Put is all or nothing: a failed Put, whatever failed,
+// stores nothing and leaves an existing object at the key unchanged, and a
+// declared size that disagrees with the body is such a failure. Every call
+// reports an object's ETag in the same HTTP entity-tag form, so an ETag from
+// List compares equal to the one from Stat. [Client] offers no conditional
+// writes and no object metadata beyond ContentType, so the owning database
+// row remains the authority for an object's metadata and for concurrent
+// updates. A feature that only some providers offer, such as leases, access
+// tiers, and presigned URLs, is reached through the provider's own handle and
+// never through [Client].
 //
 // # Store
 //
@@ -27,7 +33,9 @@
 // successful Start or after Shutdown, and otherwise delegates to the
 // provider under the caller's context. Store applies no timeout of its own to
 // an object operation, so the caller's context and the provider's transport
-// govern each call.
+// govern each call. [Store.Put] enforces the configured MaxObjectSize and the
+// declared PutOptions.Size on the body before the provider can commit, as
+// the Writing objects section describes.
 //
 // # Lifecycle wiring
 //
@@ -44,11 +52,14 @@
 //		Check:    store,
 //	})
 //
-// Start probes the provider, bounded by the configured request timeout, so an
-// unreachable container fails startup rather than serving traffic unready.
-// Shutdown clears readiness and closes the provider when it implements
-// io.Closer. It closes the provider at most once across repeated calls, and
-// it is safe before Start and after a failed Start.
+// Start ensures the configured container exists and then probes the provider,
+// both bounded by the configured request timeout, so an empty store starts
+// cleanly and an unreachable one fails startup rather than serving traffic
+// unready. [Store.EnsureContainer] repeats the container step on demand,
+// without a readiness check, so a container deleted while the process runs
+// can be recovered. Shutdown clears readiness and closes the provider when it
+// implements io.Closer. It closes the provider at most once across repeated
+// calls, and it is safe before Start and after a failed Start.
 //
 // # Readiness
 //
@@ -70,18 +81,31 @@
 // A library ships no policy numbers, so MaxObjectSize and ListPageSize have no
 // default. A value of 0 means unbounded for MaxObjectSize and the provider's
 // own page size for ListPageSize. RequestTimeout is the one default, 10
-// seconds, and it bounds only the probes Store makes in Start and Ready.
-// Finalize composes the override names from the prefix it receives (through
-// [NewEnv], recorded on [Env] for introspection), and an empty prefix
-// disables the overrides.
+// seconds, and it bounds only the calls Store makes on its own behalf in
+// Start and Ready. Finalize composes the override names from the prefix it
+// receives (through [NewEnv], recorded on [Env] for introspection), and an
+// empty prefix disables the overrides.
 //
 // # Writing objects
+//
+// [Client.Put] is all or nothing. On success the object holds exactly the
+// bytes the body yielded through EOF; on any error nothing is written at the
+// key and an object already stored there is unchanged. A PutOptions.Size
+// greater than 0 must equal the body's length, and a body that ends short of
+// it or runs past it is an error that stores nothing. Azure Blob and S3 both
+// make an upload visible only when it commits, so a provider over either can
+// keep the contract, and the storagetest suite proves that it does.
 //
 // When MaxObjectSize is set, [Store.Put] rejects a declared size over the
 // bound before calling the provider, and it reads every other body through a
 // bound that fails on the first byte past it. An oversize body returns
-// [ErrTooLarge]. The provider can have written part of the object before the
-// body ran out, so a rejected upload can leave a partial object behind.
+// [ErrTooLarge]. When a size is declared, Store reads the body through a
+// second wrapper that fails on the first byte past the declared size and
+// turns an early EOF into an error wrapping io.ErrUnexpectedEOF, so a
+// mismatch reaches the provider as a read failure before the body ends.
+// Store cannot undo a commit, so it relies on the provider's atomicity for
+// what happens after that failure; a provider that reports success anyway
+// still gets the error returned in place of the Object.
 //
 // No transaction spans a database and an object store. A consumer that
 // records an object in a database writes the owning row first in a pending

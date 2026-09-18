@@ -19,7 +19,10 @@ type Object struct {
 	ContentType string
 
 	// ETag is the provider's opaque version identifier for the object's
-	// current content.
+	// current content, in HTTP entity-tag form: a quoted string, optionally
+	// prefixed with W/. Put, Get, Stat, and List report the identical string
+	// for one version of an object, so a caller can send it as an ETag
+	// header or compare two for equality, whichever call produced them.
 	ETag string
 
 	// ModifiedAt is the time the provider recorded for the object's last
@@ -42,9 +45,14 @@ type PutOptions struct {
 	// ContentType is the media type stored with the object.
 	ContentType string
 
-	// Size is the body's length when known; 0 means unknown. A provider
-	// that must know the length to sign its request buffers the body only
-	// when Size is 0.
+	// Size is the body's length when known; 0 means unknown and asserts
+	// nothing. A provider that must know the length to sign its request
+	// buffers the body only when Size is 0.
+	//
+	// A Size greater than 0 must equal the number of bytes the body yields
+	// through EOF. A body that ends short of Size or runs past it is an
+	// error, and the Put stores nothing: a provider never truncates the body
+	// to Size and never stores the whole body regardless of Size.
 	Size int64
 }
 
@@ -100,11 +108,17 @@ type Capabilities struct {
 // Classifying a provider's errors into this package's sentinels is the
 // provider adapter's job. Get and Stat return an error matching
 // [ErrNotFound] for a missing key. Delete is idempotent: deleting a missing
-// key is a no-op success, never [ErrNotFound]. Any method may return an
-// error matching [ErrUnavailable] when the store is unreachable.
+// key is a no-op success, never [ErrNotFound]. Any method, EnsureContainer
+// and Probe included, may return an error matching [ErrUnavailable] when the
+// store is unreachable.
 type Client interface {
 	// Put writes body as the object at key, replacing any existing object,
-	// and returns the stored object's metadata.
+	// and returns the stored object's metadata. Put is all or nothing: on
+	// success the object holds exactly the bytes body yielded through EOF,
+	// and on any error, a failure of body included, nothing is written at
+	// key and an object already stored there is unchanged. When opts.Size is
+	// greater than 0 it must equal the body's length, and a body that is
+	// shorter or longer is an error that stores nothing.
 	Put(ctx context.Context, key string, body io.Reader, opts PutOptions) (Object, error)
 
 	// Get opens the object at key for reading. The caller closes the
@@ -120,6 +134,12 @@ type Client interface {
 
 	// List returns one page of objects selected by opts.
 	List(ctx context.Context, opts ListOptions) (Page, error)
+
+	// EnsureContainer creates the configured container and succeeds when it
+	// already exists. It is idempotent, and it never deletes or reconfigures
+	// an existing container. It is not an object operation. [Store] calls it
+	// from Start and EnsureContainer.
+	EnsureContainer(ctx context.Context) error
 
 	// Probe reports whether the configured credential and container are
 	// reachable. It is not an object operation. [Store] calls it from Start
