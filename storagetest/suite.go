@@ -23,8 +23,10 @@ const cleanupTimeout = 30 * time.Second
 
 // largeBodySize is the length of the one body the suite stores that is
 // larger than a typical single upload block, so a provider that splits a body
-// into blocks is exercised. 3 MiB clears the 1 MiB default block of the
-// Azure SDK's streaming upload with room for a second and a third block.
+// into blocks is exercised. 3 MiB clears a 1 MiB block, the smallest the
+// Azure SDK's streaming upload accepts, with room for a second and a third
+// block; a provider whose block is configurable runs the suite at that
+// floor.
 const largeBodySize = 3 << 20
 
 // maxPages bounds a listing walk so a provider that never returns an empty
@@ -41,10 +43,12 @@ const maxPages = 100
 // The suite asserts the contract [storage.Client] documents and nothing a
 // provider is free to choose: List results are compared as sets, so listing
 // order is not asserted, and ModifiedAt is asserted non-zero and consistent
-// across Put, Get, and Stat, never close to the wall clock. It does not
-// assert what a provider does with a PutOptions.Size that is shorter or
-// longer than the body, because that is adapter-specific and each provider's
-// documentation states its own behavior.
+// across Put, Get, and Stat, never close to the wall clock. Every ETag is
+// asserted to be in HTTP entity-tag form and identical across Put, Get,
+// Stat, and List for one version. Put is asserted all or nothing: a body
+// that fails partway and a PutOptions.Size that is shorter or longer than
+// the body each return an error, after which a fresh key is absent and an
+// existing key still holds its previous content and metadata.
 func Run(t *testing.T, newClient func(t *testing.T) storage.Client) {
 	t.Helper()
 	for _, tc := range cases {
@@ -85,7 +89,35 @@ var cases = []testCase{
 	{"PutUnknownSize", checkPutUnknownSize},
 	{"PutNonSeekableBody", checkPutNonSeekableBody},
 	{"PutOneByteReads", checkPutOneByteReads},
+	{"PutBodyFailsMidway", checkPutBodyFailsMidway},
+	{"PutSizeMismatch", checkPutSizeMismatch},
 	{"Capabilities", checkCapabilities},
+}
+
+// errBodyBroke is the error a failAfter body returns once its bytes are
+// spent, standing in for a source that broke mid-upload.
+var errBodyBroke = errors.New("storagetest: body source broke")
+
+// failAfter yields the bytes of r and then fails with err instead of io.EOF,
+// on that Read and every later one.
+type failAfter struct {
+	r   io.Reader
+	err error
+}
+
+func (f *failAfter) Read(p []byte) (int, error) {
+	n, err := f.r.Read(p)
+	if errors.Is(err, io.EOF) {
+		return n, f.err
+	}
+	return n, err
+}
+
+// isEntityTag reports whether s is an HTTP entity tag: a quoted string,
+// optionally prefixed with W/ for a weak validator.
+func isEntityTag(s string) bool {
+	s = strings.TrimPrefix(s, "W/")
+	return len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"'
 }
 
 // newPrefix returns a key prefix no other run shares. It is ASCII letters,
@@ -169,6 +201,8 @@ func wantObject(t testing.TB, what string, got, want storage.Object, key string,
 	}
 	if got.ETag == "" {
 		t.Errorf("%s ETag is empty", what)
+	} else if !isEntityTag(got.ETag) {
+		t.Errorf("%s ETag = %q, want a quoted entity tag", what, got.ETag)
 	} else if got.ETag != want.ETag {
 		t.Errorf("%s ETag = %q, want %q as Put reported", what, got.ETag, want.ETag)
 	}
@@ -254,7 +288,7 @@ func listAll(t testing.TB, c storage.Client, prefix string, limit int) ([]storag
 }
 
 // wantKeys asserts objects holds exactly the keys in want, each once, with
-// the Size that put reported for it.
+// the Size and the ETag that Put reported for it.
 func wantKeys(t testing.TB, what string, objects []storage.Object, want map[string]storage.Object) {
 	t.Helper()
 	seen := make(map[string]int, len(objects))
@@ -271,6 +305,11 @@ func wantKeys(t testing.TB, what string, objects []storage.Object, want map[stri
 		}
 		if obj.Size != expected.Size {
 			t.Errorf("%s reports Size %d for %q, want %d as Put reported", what, obj.Size, obj.Key, expected.Size)
+		}
+		if !isEntityTag(obj.ETag) {
+			t.Errorf("%s reports ETag %q for %q, want a quoted entity tag", what, obj.ETag, obj.Key)
+		} else if obj.ETag != expected.ETag {
+			t.Errorf("%s reports ETag %q for %q, want %q as Put reported", what, obj.ETag, obj.Key, expected.ETag)
 		}
 	}
 	for key := range want {
@@ -459,6 +498,78 @@ func checkPutOneByteReads(t testing.TB, c storage.Client, prefix string) {
 	content := []byte("delivered one byte per Read")
 	obj := put(t, c, key, iotest.OneByteReader(bytes.NewReader(content)), storage.PutOptions{})
 	wantContent(t, c, key, obj, content, "")
+}
+
+// wantAbsent asserts key holds no object: Stat matches ErrNotFound and a
+// listing under prefix does not show it.
+func wantAbsent(t testing.TB, c storage.Client, prefix, key string) {
+	t.Helper()
+	_, err := c.Stat(t.Context(), key)
+	wantNotFound(t, "Stat after a failed Put of a fresh key", err)
+	objects, _ := listAll(t, c, prefix, 0)
+	for _, obj := range objects {
+		if obj.Key == key {
+			t.Errorf("List shows %q after a failed Put of a fresh key, want it absent", key)
+		}
+	}
+}
+
+// failedPut is one way a Put fails: body is the body and opts the options
+// that must make it fail.
+type failedPut struct {
+	name string
+	body func() io.Reader
+	opts storage.PutOptions
+}
+
+// checkFailedPuts runs each failed Put against a fresh key, which must then
+// be absent, and against a key that already holds an object, which must then
+// hold it unchanged.
+func checkFailedPuts(t testing.TB, c storage.Client, prefix string, puts []failedPut) {
+	t.Helper()
+	for i, fp := range puts {
+		fresh := fmt.Sprintf("%sfresh-%d", prefix, i)
+		deleteOnCleanup(t, c, fresh)
+		if _, err := c.Put(t.Context(), fresh, fp.body(), fp.opts); err == nil {
+			t.Errorf("Put(%s) of a fresh key = nil, want an error", fp.name)
+		}
+		wantAbsent(t, c, prefix, fresh)
+
+		existing := fmt.Sprintf("%sexisting-%d", prefix, i)
+		old := []byte("the object stored before the failed replace")
+		before := put(t, c, existing, bytes.NewReader(old), storage.PutOptions{ContentType: "text/plain", Size: int64(len(old))})
+		if _, err := c.Put(t.Context(), existing, fp.body(), fp.opts); err == nil {
+			t.Errorf("Put(%s) over an existing key = nil, want an error", fp.name)
+		}
+		wantContent(t, c, existing, before, old, "text/plain")
+	}
+}
+
+func checkPutBodyFailsMidway(t testing.TB, c storage.Client, prefix string) {
+	t.Helper()
+	broken := func(n int) func() io.Reader {
+		return func() io.Reader {
+			return &failAfter{r: bytes.NewReader(largeBody()[:n]), err: errBodyBroke}
+		}
+	}
+	checkFailedPuts(t, c, prefix, []failedPut{
+		{"body fails after 10 bytes", broken(10), storage.PutOptions{ContentType: "application/json"}},
+		{"body fails after the large size", broken(largeBodySize), storage.PutOptions{ContentType: "application/json"}},
+	})
+}
+
+func checkPutSizeMismatch(t testing.TB, c storage.Client, prefix string) {
+	t.Helper()
+	small := []byte("a body of thirty-two bytes, here")
+	content := func(b []byte) func() io.Reader {
+		return func() io.Reader { return bytes.NewReader(b) }
+	}
+	checkFailedPuts(t, c, prefix, []failedPut{
+		{"Size shorter than the body", content(small), storage.PutOptions{ContentType: "application/json", Size: int64(len(small)) - 1}},
+		{"Size longer than the body", content(small), storage.PutOptions{ContentType: "application/json", Size: int64(len(small)) + 1}},
+		{"Size shorter than a large body", content(largeBody()), storage.PutOptions{ContentType: "application/json", Size: largeBodySize - 1}},
+		{"Size longer than a large body", content(largeBody()), storage.PutOptions{ContentType: "application/json", Size: largeBodySize + 1}},
+	})
 }
 
 func checkCapabilities(t testing.TB, c storage.Client, prefix string) {

@@ -1,10 +1,13 @@
 package azureblob_test
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -37,6 +40,12 @@ type recorded struct {
 	Path   string
 	Query  string
 	Header http.Header
+	Body   []byte
+}
+
+// blobPath is the path the service sees for key in the test container.
+func blobPath(key string) string {
+	return "/" + testAccount + "/" + testContainer + "/" + key
 }
 
 // newService starts a service that answers with respond and stops it when
@@ -50,12 +59,19 @@ func newService(t *testing.T, respond http.HandlerFunc) *service {
 }
 
 func (s *service) handle(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
 	s.mu.Lock()
 	s.requests = append(s.requests, recorded{
 		Method: r.Method,
 		Path:   r.URL.Path,
 		Query:  r.URL.RawQuery,
 		Header: r.Header.Clone(),
+		Body:   body,
 	})
 	s.mu.Unlock()
 	s.respond(w, r)
@@ -94,6 +110,60 @@ func failWith(status int, code string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		azureError(w, status, code)
 	}
+}
+
+// blobHeaders writes the metadata headers the service sends for a blob on a
+// Put, Get, or Get Properties answer.
+func blobHeaders(w http.ResponseWriter, etag, lastModified string) {
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Last-Modified", lastModified)
+}
+
+// blobStored answers every blob write (Put Blob, Put Block, and Put Block
+// List) with 201 and the given ETag and Last-Modified, and every container
+// request with 200 or 201 by method, so a storage.Store can Start over it.
+func blobStored(etag, lastModified string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("restype") == "container" {
+			if r.Method == http.MethodPut {
+				w.WriteHeader(http.StatusCreated)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		blobHeaders(w, etag, lastModified)
+		w.WriteHeader(http.StatusCreated)
+	}
+}
+
+// listPage is one scripted page of a flat blob listing.
+type listPage struct {
+	Items      []listItem
+	NextMarker string
+}
+
+// listItem is one blob in a scripted listing page.
+type listItem struct {
+	Name         string
+	Size         int64
+	ContentType  string
+	ETag         string
+	LastModified string
+}
+
+// writeListPage writes page as the XML body of a List Blobs answer.
+func writeListPage(w http.ResponseWriter, page listPage) {
+	w.Header().Set("Content-Type", "application/xml")
+	w.WriteHeader(http.StatusOK)
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="utf-8"?><EnumerationResults ServiceEndpoint="http://127.0.0.1/` + testAccount + `/" ContainerName="` + testContainer + `"><Blobs>`)
+	for _, it := range page.Items {
+		fmt.Fprintf(&b, `<Blob><Name>%s</Name><Properties><Last-Modified>%s</Last-Modified><Etag>%s</Etag><Content-Length>%d</Content-Length><Content-Type>%s</Content-Type><BlobType>BlockBlob</BlobType></Properties></Blob>`,
+			it.Name, it.LastModified, it.ETag, it.Size, it.ContentType)
+	}
+	b.WriteString(`</Blobs><NextMarker>` + page.NextMarker + `</NextMarker></EnumerationResults>`)
+	_, _ = io.WriteString(w, b.String())
 }
 
 // closedEndpoint returns a path-style endpoint on a port nothing listens on:

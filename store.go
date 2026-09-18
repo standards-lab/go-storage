@@ -113,41 +113,69 @@ func (s *Store) Ready() bool {
 }
 
 // Put writes body as the object at key after enforcing the configured
-// MaxObjectSize. A declared opts.Size over the bound is rejected with
-// [ErrTooLarge] before the provider sees the body. Otherwise the body is read
-// through a bound, whether or not a size was declared, because a declared
-// size is the caller's claim and the bound exists for untrusted bodies. A
-// body that runs past the bound fails with [ErrTooLarge], wrapped around the
-// provider's error when it returned one, even when the provider reported
-// success, because the provider then stored a truncated object.
+// MaxObjectSize and the declared opts.Size. A declared Size over the bound is
+// rejected with [ErrTooLarge] before the provider sees the body. Otherwise
+// the body is read through a bound, whether or not a size was declared,
+// because a declared size is the caller's claim and the bound exists for
+// untrusted bodies. A body that runs past the bound fails with [ErrTooLarge],
+// wrapped around the provider's error when it returned one.
 //
-// A rejected oversize upload can leave a partial object the provider wrote
-// before the body ran out. The two-phase write in the design record, an
-// owning row in a pending state written before the object, is what makes
-// that partial object findable and recoverable.
+// A declared Size greater than 0 is enforced on the body too, whether or not
+// a bound is configured: a body that ends short of Size fails with an error
+// wrapping io.ErrUnexpectedEOF, and one that runs past Size fails on the
+// first byte beyond it. Either error names the declared size and reaches the
+// provider as a read failure before the body ends, so the provider commits
+// nothing. The bound is the inner reader, so when both would trip on the
+// same byte, which happens only when Size equals the bound, the body fails
+// with [ErrTooLarge]. A body past a Size that is smaller than the bound fails
+// on the size check first, since that check needs fewer bytes to decide.
+//
+// Store cannot undo a commit, so it relies on the provider's Put being all or
+// nothing, which the storagetest suite proves for each provider. When the
+// provider nonetheless reports success after the body failed one of these
+// checks, Put returns the check's error rather than the Object.
 func (s *Store) Put(ctx context.Context, key string, body io.Reader, opts PutOptions) (Object, error) {
 	if !s.started.Load() {
 		return Object{}, ErrNotReady
 	}
-	if s.maxObjectSize <= 0 {
-		return s.client.Put(ctx, key, body, opts)
-	}
-	if opts.Size > s.maxObjectSize {
+	if s.maxObjectSize > 0 && opts.Size > s.maxObjectSize {
 		return Object{}, fmt.Errorf("%w: declared size %d exceeds the configured max object size (%d bytes)", ErrTooLarge, opts.Size, s.maxObjectSize)
 	}
 
-	bounded := newBoundedReader(body, s.maxObjectSize)
-	obj, err := s.client.Put(ctx, key, bounded, opts)
-	if bounded.tripped.Load() {
-		switch {
-		case err == nil:
-			err = bounded.err
-		case !errors.Is(err, bounded.err):
-			err = fmt.Errorf("%w: %w", bounded.err, err)
-		}
-		return Object{}, fmt.Errorf("%w: %w", ErrTooLarge, err)
+	var bounded *boundedReader
+	if s.maxObjectSize > 0 {
+		bounded = newBoundedReader(body, s.maxObjectSize)
+		body = bounded
+	}
+	var sized *sizedReader
+	if opts.Size > 0 {
+		sized = newSizedReader(body, opts.Size)
+		body = sized
+	}
+
+	obj, err := s.client.Put(ctx, key, body, opts)
+	if bounded != nil && bounded.tripped.Load() {
+		return Object{}, fmt.Errorf("%w: %w", ErrTooLarge, readFailure(bounded.err, err))
+	}
+	if sized != nil && sized.tripped.Load() {
+		return Object{}, readFailure(sized.err, err)
 	}
 	return obj, err
+}
+
+// readFailure combines the error a body wrapper recorded with what the
+// provider returned: the recorded error alone when the provider reported
+// success or already wrapped it, and both otherwise, so the provider's cause
+// stays matchable.
+func readFailure(recorded, provider error) error {
+	switch {
+	case provider == nil:
+		return recorded
+	case errors.Is(provider, recorded):
+		return provider
+	default:
+		return fmt.Errorf("%w: %w", recorded, provider)
+	}
 }
 
 // Get opens the object at key for reading. The caller closes the returned
@@ -264,4 +292,55 @@ func (b *boundedReader) Read(p []byte) (int, error) {
 	n, err := b.r.Read(p)
 	b.remain -= int64(n)
 	return n, err
+}
+
+// sizedReader holds a body to its declared size: it lets exactly size bytes
+// through, fails on the first byte beyond them, and turns an io.EOF before
+// size bytes into an error wrapping io.ErrUnexpectedEOF. Either failure is
+// recorded in err and reported on every later Read, so a provider that reads
+// again after the failure sees it again. tripped is atomic for the same
+// reason as boundedReader's.
+type sizedReader struct {
+	r       io.Reader
+	size    int64
+	read    int64
+	err     error
+	tripped atomic.Bool
+}
+
+func newSizedReader(r io.Reader, size int64) *sizedReader {
+	return &sizedReader{r: r, size: size}
+}
+
+func (s *sizedReader) Read(p []byte) (int, error) {
+	if s.tripped.Load() {
+		return 0, s.err
+	}
+	remain := s.size - s.read
+	if remain <= 0 {
+		// The declared size is spent. One more byte from the source means
+		// the body is longer than declared; none means it ended on it.
+		var probe [1]byte
+		n, err := s.r.Read(probe[:])
+		if n > 0 {
+			return 0, s.trip(fmt.Errorf("body is longer than the declared size (%d bytes)", s.size))
+		}
+		return 0, err
+	}
+	if int64(len(p)) > remain {
+		p = p[:remain]
+	}
+	n, err := s.r.Read(p)
+	s.read += int64(n)
+	if errors.Is(err, io.EOF) && s.read < s.size {
+		return n, s.trip(fmt.Errorf("body ended after %d bytes, short of the declared size (%d bytes): %w", s.read, s.size, io.ErrUnexpectedEOF))
+	}
+	return n, err
+}
+
+// trip records err as the failure every later Read reports and returns it.
+func (s *sizedReader) trip(err error) error {
+	s.err = err
+	s.tripped.Store(true)
+	return err
 }

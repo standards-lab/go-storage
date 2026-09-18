@@ -39,6 +39,33 @@ func TestNew_ContainerURL(t *testing.T) {
 	}
 }
 
+func TestUploadOptions(t *testing.T) {
+	cases := []struct {
+		name            string
+		options         map[string]string
+		wantBlockSize   int64
+		wantConcurrency int
+	}{
+		{"unset applies the defaults", nil, DefaultBlockSize, DefaultConcurrency},
+		{"block_size at the floor", map[string]string{"block_size": "1048576"}, 1 << 20, DefaultConcurrency},
+		{"block_size at the cap", map[string]string{"block_size": "104857600"}, 100 << 20, DefaultConcurrency},
+		{"concurrency at the floor", map[string]string{"concurrency": "1"}, DefaultBlockSize, 1},
+		{"concurrency at the cap", map[string]string{"concurrency": "32"}, DefaultBlockSize, 32},
+		{"both set", map[string]string{"block_size": "8388608", "concurrency": "2"}, 8 << 20, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			blockSize, concurrency, err := uploadOptions(tc.options)
+			if err != nil {
+				t.Fatalf("uploadOptions: %v", err)
+			}
+			if blockSize != tc.wantBlockSize || concurrency != tc.wantConcurrency {
+				t.Errorf("uploadOptions = (%d, %d), want (%d, %d)", blockSize, concurrency, tc.wantBlockSize, tc.wantConcurrency)
+			}
+		})
+	}
+}
+
 func TestClientOptions_MaxRetries(t *testing.T) {
 	cases := []struct {
 		name    string

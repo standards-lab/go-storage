@@ -47,6 +47,22 @@
 //     construction error. A deployment that wants storage.Store's bounded
 //     probes to fail fast sets a small value here, because the retry backoff
 //     otherwise consumes most of the probe's timeout.
+//   - block_size: the size in bytes of each block a Put stages when the body
+//     is longer than one block, and of each buffer an upload worker holds.
+//     The value is an integer between 1,048,576 (1 MiB, the SDK's floor) and
+//     104,857,600 (100 MiB). Unset means [DefaultBlockSize], 4 MiB.
+//   - concurrency: the number of workers that stage blocks for one Put, each
+//     holding one block buffer, as an integer between 1 and 32. Unset means
+//     [DefaultConcurrency], 4.
+//
+// A Put in flight holds at most block_size times concurrency bytes of buffer
+// memory: 16 MiB at the defaults. The SDK allocates the buffers with an
+// anonymous mmap rather than on the Go heap, one at a time as they are
+// needed, so a body shorter than one block allocates one buffer. A process
+// that serves many uploads at once multiplies that figure by its concurrent
+// Puts. The service accepts at most 50,000 blocks per blob, so the largest
+// object a Put can store is 50,000 blocks of block_size: about 195 GiB at
+// the default.
 //
 // # Container operations
 //
@@ -55,6 +71,78 @@
 // [Client.Probe] reads the container's properties, which proves the
 // endpoint, the credential, and the container together; a missing container
 // matches storage.ErrNotFound.
+//
+// # Object operations
+//
+// [Client.Put] uploads the body through the SDK's streaming upload, which
+// takes a plain io.Reader and needs neither the body's length nor a seek. A
+// body shorter than one block is sent in one Put Blob request; a longer one
+// is staged as blocks and committed with one Put Block List. Both requests
+// replace the blob in one step, and the SDK sends either only after the body
+// has ended, so Put is all or nothing: on success the blob holds exactly the
+// bytes the body yielded through EOF, and on any error nothing is written at
+// the key and a blob already stored there is unchanged. The Size the
+// returned Object reports is the count of bytes read. PutOptions.ContentType
+// is sent as the blob's Content-Type when set. The service resets a replaced
+// blob's content type to application/octet-stream when the request carries
+// none, so a caller that wants the type kept across a replace passes it on
+// every Put.
+//
+// A PutOptions.Size greater than 0 is enforced on the body. A body that ends
+// short of Size fails with an error wrapping io.ErrUnexpectedEOF, and one
+// that runs past Size fails on the first byte beyond it, so the blob is
+// never truncated to Size and never holds a body longer than it. A Size of 0
+// asserts nothing. Either mismatch is a failure of the body, described next.
+//
+// A failure of the body itself is not a failure of the store. When the body
+// returns an error other than io.EOF, Put returns that error wrapped and
+// unclassified, so it never matches storage.ErrUnavailable and a sentinel
+// the body carried stays matchable: storage.Store's size bound reaches the
+// caller as storage.ErrTooLarge through this path. Nothing is committed
+// then. A body that fit in one block was never sent, and the staged blocks
+// of a longer one stay uncommitted. Uncommitted blocks are invisible to Get,
+// Stat, and List, and the service discards them after about a week when no
+// Put Block List has committed them; they are the one trace a failed upload
+// leaves.
+//
+// [Client.Get] opens the blob with one Get Blob request and returns the
+// response body as the stream; the caller closes it. [Client.Stat] reads the
+// blob's properties. Both build the Object from the response headers, and a
+// missing blob matches storage.ErrNotFound. [Client.Delete] treats the
+// service's BlobNotFound answer as the idempotent success the contract asks
+// for. A missing container is not swallowed: it matches storage.ErrNotFound,
+// because it says the configured target is gone rather than that the key is.
+//
+// [Client.List] fetches one page of the container's flat listing per call.
+// ListOptions.Prefix, Token, and Limit map to the request's prefix, marker,
+// and maxresults; a Limit of 0 leaves maxresults unset, so the service's own
+// page size (5,000) applies. Page.Next is the service's NextMarker, verbatim
+// and never inspected: Azure returns an opaque token and Azurite returns the
+// last key of the page, and either is passed back as given.
+//
+// The ETag is reported in HTTP entity-tag form on every call. The service
+// quotes it in the response headers Put, Get, and Stat read ("0x8D...") and
+// leaves it unquoted in the XML of a listing (0x8D...); the client adds the
+// quotes a listing omits and leaves a quoted or W/"..." value as it is, so
+// an Object from List carries the same string for a version as one from
+// Stat. Azurite behaves the same way.
+//
+// # Acceptance against Azurite
+//
+// The package's unit tests run against a scripted HTTP server. Two further
+// tests run against a real service and skip unless the environment variable
+// AZUREBLOB_TEST_ENDPOINT names its URL: one runs storagetest.Run over the
+// provider, the other drives storage.Store.Start against an empty service.
+// Each creates a container of its own and deletes it afterwards. To run
+// them against Azurite, start it with the version check off and point the
+// variable at its path-style address:
+//
+//	docker run --rm -p 10000:10000 mcr.microsoft.com/azure-storage/azurite \
+//		azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+//	AZUREBLOB_TEST_ENDPOINT=http://127.0.0.1:10000/devstoreaccount1 go test ./...
+//
+// The tests use the published development account and key, so no
+// configuration beyond the endpoint is needed.
 //
 // # Keys
 //

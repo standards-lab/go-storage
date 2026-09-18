@@ -47,7 +47,8 @@ var (
 // test can wrap it in a storage.Store or hand it to any consumer of the
 // interface, and it records what it received so a test can assert what was
 // passed through. Put stores a copy of the whole body, Get returns a copy,
-// and the ETag is a hash of the content, so equal bodies share an ETag.
+// and the ETag is a hash of the content in quoted entity-tag form, so equal
+// bodies share an ETag.
 //
 // Down is the outage toggle: while it is set, every method, EnsureContainer
 // and Probe included, fails with an error matching storage.ErrUnavailable
@@ -244,7 +245,10 @@ func (f *Fake) noContainer() error {
 
 // Put reads body to EOF and stores a copy under key, replacing any existing
 // object and its ContentType. It counts the call and records opts and the
-// bytes read before it checks Down, the container, or a FailPut error.
+// bytes read before it checks Down, the container, or a FailPut error. A Put
+// that fails, whether on the body, on a Size that disagrees with the bytes
+// read, or on a FailPut error, stores nothing and leaves an existing object
+// at key as it was.
 func (f *Fake) Put(_ context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
 	f.puts.Add(1)
 	if f.Down.Load() {
@@ -264,6 +268,12 @@ func (f *Fake) Put(_ context.Context, key string, body io.Reader, opts storage.P
 	if readErr != nil {
 		return storage.Object{}, fmt.Errorf("fake put: %w", readErr)
 	}
+	if n := int64(len(data)); opts.Size > 0 && n != opts.Size {
+		if n < opts.Size {
+			return storage.Object{}, fmt.Errorf("fake put: body ended after %d bytes, short of the declared size (%d bytes): %w", n, opts.Size, io.ErrUnexpectedEOF)
+		}
+		return storage.Object{}, fmt.Errorf("fake put: body is %d bytes, longer than the declared size (%d bytes)", n, opts.Size)
+	}
 	if f.putErr != nil {
 		return storage.Object{}, fmt.Errorf("fake put: %w", f.putErr)
 	}
@@ -274,7 +284,7 @@ func (f *Fake) Put(_ context.Context, key string, body io.Reader, opts storage.P
 			Key:         key,
 			Size:        int64(len(data)),
 			ContentType: opts.ContentType,
-			ETag:        hex.EncodeToString(sum[:]),
+			ETag:        `"` + hex.EncodeToString(sum[:]) + `"`,
 			ModifiedAt:  f.now(),
 		},
 		data: data,

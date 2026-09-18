@@ -33,8 +33,24 @@ only; each provider sub-module keeps its own.
   object operation outside the started window, the configured page size on a `List` with no
   limit, and the `MaxObjectSize` bound on `Put` through a reader that fails on the first byte
   past it.
+- The atomic `Put` contract. `Client.Put` is all or nothing: on any error nothing is written at
+  the key and an existing object is unchanged, and on success the object holds exactly the
+  bytes the body yielded through EOF. A `PutOptions.Size` greater than 0 must equal the body's
+  length, and a body that is shorter or longer is an error that stores nothing. `Store.Put`
+  enforces a declared `Size` on the body whether or not a bound is configured: a short body ends
+  in an error wrapping `io.ErrUnexpectedEOF` and a long one fails on the first byte past
+  `Size`, so the provider sees a read failure before it can commit. The bound is the inner
+  reader, so a body past a `Size` equal to the bound still reports `ErrTooLarge`.
+- `Object.ETag` is an HTTP entity tag: a quoted string, optionally prefixed `W/`, identical
+  across `Put`, `Get`, `Stat`, and `List` for one version of an object.
 - `storagetest` — the test support package. `Fake` is an in-memory `Client` for a consumer's
   hermetic tests, with an outage toggle, a container that `DropContainer` removes and
   `EnsureContainer` recreates, injected `Put` failures, and observation of the calls it received.
   `Run` is the conformance suite a provider runs against its own `Client`: it writes every key
   under a random prefix and deletes what it wrote, so it runs against a shared container.
+- `storagetest` cases for the atomic `Put` contract and the entity-tag form. `PutBodyFailsMidway`
+  and `PutSizeMismatch` assert that a body which fails partway and a `Size` that disagrees
+  with the body each return an error, after which a fresh key is absent and an existing key
+  holds its previous bytes, content type, and ETag. Every reported ETag is asserted to be in
+  entity-tag form and equal across `Put`, `Get`, `Stat`, and `List`. `Fake` enforces `Size`
+  and reports a quoted ETag.

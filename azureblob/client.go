@@ -14,9 +14,38 @@ import (
 	"github.com/standards-lab/go-storage"
 )
 
-// optionMaxRetries is the Options key that bounds the SDK's retry count. See
-// the package documentation for its values.
-const optionMaxRetries = "max_retries"
+// The Options keys this package reads. See the package documentation for
+// their values.
+const (
+	optionMaxRetries  = "max_retries"
+	optionBlockSize   = "block_size"
+	optionConcurrency = "concurrency"
+)
+
+// The upload sizing a Client applies when the block_size and concurrency
+// options are unset, and the range each option accepts. A Put stages a body
+// longer than one block in blocks of block_size bytes, and each of the
+// concurrency workers holds one block buffer, so a Put in flight holds at
+// most block_size times concurrency bytes: 16 MiB at the defaults.
+//
+// DefaultBlockSize is four times the SDK's 1 MiB minimum, so a multi-block
+// body takes a quarter of the requests, while the service's 50,000-block
+// limit still admits an object of about 195 GiB. DefaultConcurrency keeps
+// four blocks in flight, enough to overlap request latency on a single
+// upload, at 16 MiB per Put. minBlockSize is the SDK's own floor, which it
+// applies silently to anything smaller. maxBlockSize is the largest block the
+// service accepted before version 2019-12-12 and is already 100 MiB held per
+// worker. maxConcurrency bounds the workers where 32 blocks of the default
+// size reach 128 MiB per Put.
+const (
+	DefaultBlockSize   int64 = 4 << 20
+	DefaultConcurrency       = 4
+	minBlockSize       int64 = 1 << 20
+	maxBlockSize       int64 = 100 << 20
+	maxConcurrency           = 32
+)
+
+var _ storage.Client = (*Client)(nil)
 
 // Client is the Azure Blob Storage provider: a storage.Client over one
 // container of one storage account, authenticated with the account's shared
@@ -25,7 +54,9 @@ const optionMaxRetries = "max_retries"
 //
 // A Client is safe for concurrent use.
 type Client struct {
-	container *container.Client
+	container   *container.Client
+	blockSize   int64
+	concurrency int
 }
 
 // New constructs a Client from a finalized config without I/O. Container,
@@ -56,6 +87,10 @@ func New(cfg storage.Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	blockSize, concurrency, err := uploadOptions(cfg.Options)
+	if err != nil {
+		return nil, err
+	}
 
 	cred, err := container.NewSharedKeyCredential(cfg.Account, cfg.Key)
 	if err != nil {
@@ -72,7 +107,29 @@ func New(cfg storage.Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("azureblob: container client: %w", err)
 	}
-	return &Client{container: cc}, nil
+	return &Client{container: cc, blockSize: blockSize, concurrency: concurrency}, nil
+}
+
+// uploadOptions reads the block_size and concurrency settings out of Options,
+// applying the defaults for an unset key and rejecting a value outside the
+// range the constants above state.
+func uploadOptions(options map[string]string) (blockSize int64, concurrency int, err error) {
+	blockSize, concurrency = DefaultBlockSize, DefaultConcurrency
+	if v, ok := options[optionBlockSize]; ok {
+		n, perr := strconv.ParseInt(v, 10, 64)
+		if perr != nil || n < minBlockSize || n > maxBlockSize {
+			return 0, 0, fmt.Errorf("azureblob: option %s: %q is not an integer between %d and %d bytes", optionBlockSize, v, minBlockSize, maxBlockSize)
+		}
+		blockSize = n
+	}
+	if v, ok := options[optionConcurrency]; ok {
+		n, perr := strconv.Atoi(v)
+		if perr != nil || n < 1 || n > maxConcurrency {
+			return 0, 0, fmt.Errorf("azureblob: option %s: %q is not an integer between 1 and %d", optionConcurrency, v, maxConcurrency)
+		}
+		concurrency = n
+	}
+	return blockSize, concurrency, nil
 }
 
 // clientOptions reads the provider settings out of Options. Only the keys the

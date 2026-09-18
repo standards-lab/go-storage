@@ -623,6 +623,8 @@ func TestStore_PutBound(t *testing.T) {
 		body         string
 		size         int64
 		wantTooLarge bool
+		// wantMismatch expects the size check to reject the body.
+		wantMismatch bool
 		// wantPuts is the number of Put calls the fake should have seen.
 		wantPuts int64
 		// wantConsumed is the fake's consumed byte count when a Put reached
@@ -679,6 +681,15 @@ func TestStore_PutBound(t *testing.T) {
 			maxSize:      bound,
 			body:         large,
 			size:         2,
+			wantMismatch: true,
+			wantPuts:     1,
+			wantConsumed: 2,
+		},
+		{
+			name:         "a declared size at the bound reports a longer body as too large",
+			maxSize:      bound,
+			body:         large,
+			size:         bound,
 			wantTooLarge: true,
 			wantPuts:     1,
 			wantConsumed: bound,
@@ -691,14 +702,24 @@ func TestStore_PutBound(t *testing.T) {
 			ctx := context.Background()
 
 			_, err := s.Put(ctx, "k", strings.NewReader(tc.body), storage.PutOptions{Size: tc.size})
-			if tc.wantTooLarge {
+			switch {
+			case tc.wantTooLarge:
 				if !errors.Is(err, storage.ErrTooLarge) {
 					t.Errorf("Put = %v, want ErrTooLarge", err)
 				}
 				if err != nil && !strings.Contains(err.Error(), fmt.Sprint(bound)) {
 					t.Errorf("error %q does not name the bound %d", err, bound)
 				}
-			} else if err != nil {
+			case tc.wantMismatch:
+				// The size check trips before the bound can, so the body is
+				// rejected as disagreeing with its declared size.
+				if err == nil || errors.Is(err, storage.ErrTooLarge) {
+					t.Errorf("Put = %v, want a size mismatch that is not ErrTooLarge", err)
+				}
+				if err != nil && !strings.Contains(err.Error(), fmt.Sprintf("declared size (%d bytes)", tc.size)) {
+					t.Errorf("error %q does not name the declared size %d", err, tc.size)
+				}
+			case err != nil:
 				t.Fatalf("Put: %v", err)
 			}
 
@@ -708,7 +729,7 @@ func TestStore_PutBound(t *testing.T) {
 			if _, consumed := f.LastPut(); tc.wantConsumed >= 0 && consumed > tc.wantConsumed+1 {
 				t.Errorf("fake consumed %d bytes, want at most %d", consumed, tc.wantConsumed+1)
 			}
-			if tc.wantConsumed >= 0 && !tc.wantTooLarge {
+			if tc.wantConsumed >= 0 && !tc.wantTooLarge && !tc.wantMismatch {
 				if _, consumed := f.LastPut(); consumed != tc.wantConsumed {
 					t.Errorf("fake consumed %d bytes, want %d", consumed, tc.wantConsumed)
 				}
@@ -852,7 +873,8 @@ func TestStore_PutBoundTripsEvenWhenClientSucceeds(t *testing.T) {
 }
 
 // lenientPutClient is a fake whose Put reads what it can and ignores a read
-// error. It then reports success for whatever it got, or err when one is set.
+// error and the declared Size. It then reports success for whatever it got,
+// or err when one is set.
 type lenientPutClient struct {
 	*storagetest.Fake
 	err error
@@ -864,7 +886,182 @@ func (c *lenientPutClient) Put(ctx context.Context, key string, body io.Reader, 
 	if c.err != nil {
 		return storage.Object{}, c.err
 	}
+	opts.Size = 0
 	return c.Fake.Put(ctx, key, &buf, opts)
+}
+
+func TestStore_PutDeclaredSize(t *testing.T) {
+	body := "0123456789"
+	tests := []struct {
+		name    string
+		maxSize int64
+		size    int64
+		// wantShort expects the error to wrap io.ErrUnexpectedEOF.
+		wantShort bool
+		// wantLong expects the error to report a body past its declared
+		// size, after at most size bytes were consumed.
+		wantLong bool
+	}{
+		{"exact size with no bound", 0, 10, false, false},
+		{"exact size within the bound", 64, 10, false, false},
+		{"short body with no bound", 0, 12, true, false},
+		{"short body within the bound", 64, 12, true, false},
+		{"long body with no bound", 0, 4, false, true},
+		{"long body within the bound", 64, 4, false, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := storagetest.NewFake()
+			s := startedStore(t, f, tc.maxSize, 0)
+			ctx := context.Background()
+
+			_, err := s.Put(ctx, "k", strings.NewReader(body), storage.PutOptions{Size: tc.size})
+			_, consumed := f.LastPut()
+			switch {
+			case tc.wantShort:
+				if !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Errorf("Put = %v, want io.ErrUnexpectedEOF wrapped", err)
+				}
+				want := fmt.Sprintf("body ended after %d bytes, short of the declared size (%d bytes)", len(body), tc.size)
+				if err != nil && !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+			case tc.wantLong:
+				if err == nil || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, storage.ErrTooLarge) {
+					t.Errorf("Put = %v, want a plain error for a body past its declared size", err)
+				}
+				want := fmt.Sprintf("body is longer than the declared size (%d bytes)", tc.size)
+				if err != nil && !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+				if consumed > tc.size {
+					t.Errorf("fake consumed %d bytes, want at most the declared %d", consumed, tc.size)
+				}
+			default:
+				if err != nil {
+					t.Fatalf("Put: %v", err)
+				}
+				if consumed != tc.size {
+					t.Errorf("fake consumed %d bytes, want %d", consumed, tc.size)
+				}
+			}
+			if errors.Is(err, storage.ErrTooLarge) {
+				t.Errorf("Put = %v matches ErrTooLarge for a body within the bound", err)
+			}
+
+			_, statErr := s.Stat(ctx, "k")
+			if tc.wantShort || tc.wantLong {
+				if !errors.Is(statErr, storage.ErrNotFound) {
+					t.Errorf("Stat after a rejected Put = %v, want ErrNotFound", statErr)
+				}
+			} else if statErr != nil {
+				t.Errorf("Stat after an accepted Put = %v, want nil", statErr)
+			}
+		})
+	}
+}
+
+func TestStore_PutDeclaredSizeReaderShapes(t *testing.T) {
+	// The size check must hold whatever shape the body's reads take, as the
+	// bound must.
+	const size = 8
+	shapes := []struct {
+		name string
+		wrap func(io.Reader) io.Reader
+	}{
+		{"data with EOF", iotest.DataErrReader},
+		{"one byte per read", iotest.OneByteReader},
+		{"half reads", iotest.HalfReader},
+	}
+	for _, shape := range shapes {
+		t.Run(shape.name, func(t *testing.T) {
+			f := storagetest.NewFake()
+			s := startedStore(t, f, 0, 0)
+			ctx := context.Background()
+
+			exact := strings.Repeat("e", size)
+			if _, err := s.Put(ctx, "exact", shape.wrap(strings.NewReader(exact)), storage.PutOptions{Size: size}); err != nil {
+				t.Fatalf("Put of the declared size: %v", err)
+			}
+			if _, consumed := f.LastPut(); consumed != size {
+				t.Errorf("fake consumed %d bytes, want %d", consumed, size)
+			}
+
+			short := strings.Repeat("s", size-1)
+			if _, err := s.Put(ctx, "short", shape.wrap(strings.NewReader(short)), storage.PutOptions{Size: size}); !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Errorf("Put one byte short of the declared size = %v, want io.ErrUnexpectedEOF", err)
+			}
+			if _, err := s.Stat(ctx, "short"); !errors.Is(err, storage.ErrNotFound) {
+				t.Errorf("Stat after a short Put = %v, want ErrNotFound", err)
+			}
+
+			over := strings.Repeat("o", size+1)
+			if _, err := s.Put(ctx, "over", shape.wrap(strings.NewReader(over)), storage.PutOptions{Size: size}); err == nil {
+				t.Error("Put one byte over the declared size = nil, want an error")
+			}
+			if _, consumed := f.LastPut(); consumed > size {
+				t.Errorf("fake consumed %d bytes over the declared size, want at most %d", consumed, size)
+			}
+			if _, err := s.Stat(ctx, "over"); !errors.Is(err, storage.ErrNotFound) {
+				t.Errorf("Stat after an over-long Put = %v, want ErrNotFound", err)
+			}
+		})
+	}
+}
+
+func TestStore_PutDeclaredSizeTripsEvenWhenClientSucceeds(t *testing.T) {
+	// A client that swallows the read error and reports success has stored
+	// a body other than the declared one; the Store must still fail the Put.
+	f := &lenientPutClient{Fake: storagetest.NewFake()}
+	s := startedStore(t, f, 0, 0)
+	ctx := context.Background()
+
+	_, err := s.Put(ctx, "short", strings.NewReader("abc"), storage.PutOptions{Size: 5})
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("Put of a short body = %v, want io.ErrUnexpectedEOF even though the client returned nil", err)
+	}
+	_, err = s.Put(ctx, "long", strings.NewReader("abcdef"), storage.PutOptions{Size: 5})
+	if err == nil || !strings.Contains(err.Error(), "longer than the declared size (5 bytes)") {
+		t.Errorf("Put of a long body = %v, want the size error even though the client returned nil", err)
+	}
+	if got := f.Puts(); got != 2 {
+		t.Errorf("puts = %d, want 2", got)
+	}
+}
+
+func TestStore_PutDeclaredSizeKeepsClientCause(t *testing.T) {
+	// A client that fails for a reason of its own after the size check
+	// tripped yields an error that names the declared size and keeps the
+	// client's cause matchable.
+	cause := errors.New("provider closed the connection")
+	f := &lenientPutClient{Fake: storagetest.NewFake(), err: cause}
+	s := startedStore(t, f, 0, 0)
+
+	_, err := s.Put(context.Background(), "k", strings.NewReader("abc"), storage.PutOptions{Size: 5})
+	if !errors.Is(err, io.ErrUnexpectedEOF) || !errors.Is(err, cause) {
+		t.Fatalf("Put = %v, want io.ErrUnexpectedEOF with the client's cause", err)
+	}
+	if !strings.Contains(err.Error(), "(5 bytes)") {
+		t.Errorf("error %q does not name the declared size", err)
+	}
+}
+
+func TestStore_PutDeclaredSizeLeavesExistingObject(t *testing.T) {
+	f := storagetest.NewFake()
+	s := startedStore(t, f, 0, 0)
+	ctx := context.Background()
+	before := putString(t, s, "k", "the original")
+
+	if _, err := s.Put(ctx, "k", strings.NewReader("replacement"), storage.PutOptions{Size: 3}); err == nil {
+		t.Fatal("Put with a Size shorter than the body = nil, want an error")
+	}
+	after, err := s.Stat(ctx, "k")
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if after != before {
+		t.Errorf("Stat after a rejected replace = %+v, want the original %+v", after, before)
+	}
 }
 
 func TestStore_ListLimit(t *testing.T) {

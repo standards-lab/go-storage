@@ -1,6 +1,7 @@
 package storagetest
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -164,6 +165,71 @@ func (c *permissiveKeys) Capabilities() storage.Capabilities {
 	return storage.Capabilities{MaxKeyLength: 1, ValidateKey: func(string) error { return nil }}
 }
 
+// unquotedListETag strips the quotes from every ETag a listing reports, the
+// way a provider does when it copies a listing's XML value verbatim.
+type unquotedListETag struct{ *Fake }
+
+func (c *unquotedListETag) List(ctx context.Context, opts storage.ListOptions) (storage.Page, error) {
+	page, err := c.Fake.List(ctx, opts)
+	for i := range page.Objects {
+		page.Objects[i].ETag = strings.Trim(page.Objects[i].ETag, `"`)
+	}
+	return page, err
+}
+
+// statETagDiffers reports an ETag from Stat other than the one Put reported.
+type statETagDiffers struct{ *Fake }
+
+func (c *statETagDiffers) Stat(ctx context.Context, key string) (storage.Object, error) {
+	obj, err := c.Fake.Stat(ctx, key)
+	obj.ETag = `"stat-` + strings.Trim(obj.ETag, `"`) + `"`
+	return obj, err
+}
+
+// commitsPartialBody stores the bytes it read before the body failed and
+// then returns the body's error.
+type commitsPartialBody struct{ *Fake }
+
+func (c *commitsPartialBody) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
+	data, readErr := io.ReadAll(body)
+	opts.Size = 0
+	obj, err := c.Fake.Put(ctx, key, bytes.NewReader(data), opts)
+	if readErr != nil {
+		return storage.Object{}, readErr
+	}
+	return obj, err
+}
+
+// ignoresSize stores the whole body whatever Size says.
+type ignoresSize struct{ *Fake }
+
+func (c *ignoresSize) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
+	opts.Size = 0
+	return c.Fake.Put(ctx, key, body, opts)
+}
+
+// truncatesToSize stores the first Size bytes of a longer body.
+type truncatesToSize struct{ *Fake }
+
+func (c *truncatesToSize) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
+	if opts.Size > 0 {
+		body = io.LimitReader(body, opts.Size)
+		opts.Size = 0
+	}
+	return c.Fake.Put(ctx, key, body, opts)
+}
+
+// overwritesBeforeFailing removes the existing object before it reads the
+// body, so a body that fails leaves the key empty.
+type overwritesBeforeFailing struct{ *Fake }
+
+func (c *overwritesBeforeFailing) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
+	if err := c.Delete(ctx, key); err != nil {
+		return storage.Object{}, err
+	}
+	return c.Fake.Put(ctx, key, body, opts)
+}
+
 func TestCases_CatchBrokenClients(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -181,6 +247,12 @@ func TestCases_CatchBrokenClients(t *testing.T) {
 		{"List ignores the prefix", &ignoresPrefix{NewFake()}, "List"},
 		{"EnsureContainer fails over an existing container", &ensureOnce{NewFake(WithoutContainer())}, "EnsureContainer"},
 		{"ValidateKey accepts every key", &permissiveKeys{NewFake()}, "Capabilities"},
+		{"List reports an unquoted ETag", &unquotedListETag{NewFake()}, "List"},
+		{"Stat reports an ETag other than Put's", &statETagDiffers{NewFake()}, "RoundTrip"},
+		{"Put commits the bytes read before the body failed", &commitsPartialBody{NewFake()}, "PutBodyFailsMidway"},
+		{"Put overwrites the existing object before failing", &overwritesBeforeFailing{NewFake()}, "PutBodyFailsMidway"},
+		{"Put stores the body ignoring Size", &ignoresSize{NewFake()}, "PutSizeMismatch"},
+		{"Put truncates the body to Size", &truncatesToSize{NewFake()}, "PutSizeMismatch"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
