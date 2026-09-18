@@ -18,9 +18,9 @@ is promoted to the architecture repository through its `context/`.
 
 - **Module layout.** One base module is rooted at `github.com/standards-lab/go-storage`, holding
   `Config`, the `Store` lifecycle wrapper, the standard-tier `Client` interface, `Capabilities`,
-  and the error sentinels at its root. The base module depends on the standard library and
-  `go-core` alone and never imports a provider's SDK. Provider sub-modules, each with its own
-  `go.mod`, are added as they are built.
+  and the error sentinels at its root, with the `storagetest` test support package beside them.
+  The base module depends on the standard library and `go-core` alone and never imports a
+  provider's SDK. Each provider is a sub-module with its own `go.mod`; `azureblob` is the first.
 - **Local development.** Development uses the committed root `go.work`. Pinned `require` versions
   are the committed steady state; a `replace` directive is only a transient bridge while a
   sub-module builds against unreleased base changes.

@@ -5,7 +5,7 @@
 // library and go-core's config package alone. A provider implements [Client]
 // over its own SDK in a separate sub-module, so a consumer imports its
 // provider once, at the composition root, and the base module never imports
-// a provider's SDK. No provider has been released yet.
+// a provider's SDK. The azureblob sub-module is the Azure Blob provider.
 //
 // # The standard tier
 //
@@ -82,10 +82,9 @@
 // default. A value of 0 means unbounded for MaxObjectSize and the provider's
 // own page size for ListPageSize. RequestTimeout is the one default, 10
 // seconds, and it bounds only the calls Store makes on its own behalf in
-// Start and Ready.
-// Finalize composes the override names from the prefix it receives (through
-// [NewEnv], recorded on [Env] for introspection), and an empty prefix
-// disables the overrides.
+// Start and Ready. Finalize composes the override names from the prefix it
+// receives (through [NewEnv], recorded on [Env] for introspection), and an
+// empty prefix disables the overrides.
 //
 // # Writing objects
 //
