@@ -6,7 +6,7 @@ golangci-lint = "2.13.2"
 # use-list and the ci.yml matrix. "." is the base module; provider sub-modules
 # are added as they are built.
 [env]
-GO_MODULES = "."
+GO_MODULES = ". azureblob"
 
 # Each module builds with the workspace off, resolving its pins the way a
 # consumer does, so a pin that no longer builds fails here and in CI rather

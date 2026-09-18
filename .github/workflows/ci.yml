@@ -16,6 +16,7 @@ jobs:
       matrix:
         module:
           - "."
+          - "azureblob"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -62,6 +63,7 @@ jobs:
       matrix:
         module:
           - "."
+          - "azureblob"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
