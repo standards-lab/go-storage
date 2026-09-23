@@ -29,6 +29,8 @@ the standard's principles it enhances are stated below. Its repository-level pri
   unchanged, and a declared size that disagrees with the body is such a failure. The
   `storagetest` suite proves each provider keeps this.
 
+[docs/design.md](docs/design.md) explains why the library is shaped as it is.
+
 ## Packages
 
 - `storage` (the base module's root package) — `Client`, the standard-tier interface, with
