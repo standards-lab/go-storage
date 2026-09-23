@@ -41,10 +41,9 @@ known `Content-Length` through keeps the common path free of buffering.
 
 ## `Store` is the call surface
 
-`Store` implements `Client` itself rather than only wrapping the provider, unlike go-database's
-`DB`, which leaves calls to sqlate. Object storage has nothing above it the way sqlate sits above
-the pool, so `Store` is where the size bound, the declared size, and the readiness gate are
-enforced for every consumer.
+`Store` implements `Client` itself rather than only wrapping the provider. Nothing sits above the
+store to carry the calls, so `Store` is where the size bound, the declared size, and the
+readiness gate are enforced for every consumer.
 
 `Start` creates the container when it is missing, so an empty store starts cleanly and a process
 never exits for want of a container nothing else would create. The cost is that the serving
