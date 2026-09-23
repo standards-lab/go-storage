@@ -1,9 +1,9 @@
 # Design
 
-The reasoning behind go-storage's shape. The package documentation states what each type does;
-this page states why it is that way.
+This page explains why go-storage is shaped as it is. The package documentation states what each
+type does.
 
-## A proposed standard tier
+## The standard tier is a proposal
 
 No formal standard exists for object storage, so the standard tier is derived from what the two
 target APIs, Azure Blob Storage and Amazon S3, share, and kept narrow. An interface is the least
@@ -16,9 +16,9 @@ arguments, and there is no text artifact and no dialect.
 
 ## What the interface leaves out
 
-- **Conditional writes.** S3 gained `If-Match` and `If-None-Match` on `PutObject` only in 2024,
-  and S3-compatible stores cover them unevenly. A stored object's concurrency is the owning SQL
-  row's version column's job, never the object store's ETag.
+- **Conditional writes.** S3 has supported `If-Match` and `If-None-Match` on `PutObject` only
+  since 2024, and S3-compatible stores cover them unevenly. The owning SQL row's version column
+  controls a stored object's concurrency, never the object store's ETag.
 - **Object metadata beyond `ContentType`.** Azure metadata keys must be C# identifiers and
   normalize case; S3's take an `x-amz-meta-` prefix and are lowercased. They don't round-trip
   identically, and every object already has a SQL row that is the metadata authority.
@@ -26,7 +26,8 @@ arguments, and there is no text artifact and no dialect.
 - **Copy, move, and signed URLs.** The tier is neither the intersection nor the union of the
   providers' features, only the operations real use needs. Presigned URLs and SAS tokens are
   native tier even though both providers have them, because no standard defines them, and the
-  authorization posture forbids them on the request path: authorize the record, proxy the bytes.
+  authorization posture forbids them on the request path: the service authorizes the request
+  against the record and proxies the bytes itself.
 
 `Probe` and `EnsureContainer` are on `Client` although they are not object operations, because
 `Store`'s lifecycle and the admin surface need them from every provider, and adding a method once
@@ -38,7 +39,7 @@ for SQL rendering.
 its own, while the AWS SDK needs a seekable body or a known length to sign the request. Passing a
 known `Content-Length` through keeps the common path free of buffering.
 
-## Store is the call surface
+## `Store` is the call surface
 
 `Store` implements `Client` itself rather than only wrapping the provider, unlike go-database's
 `DB`, which leaves calls to sqlate. Object storage has nothing above it the way sqlate sits above
@@ -64,7 +65,7 @@ for itself; one timeout over every operation would cut off a large upload.
 
 ## Swapping providers
 
-A provider swap is a configuration change that needs review of three things:
+A provider swap is a configuration change, reviewed for three differences:
 
 - **Consistency.** Azure Blob and Amazon S3 are strongly consistent for read-after-write and list;
   an S3-compatible store may not be.
@@ -72,9 +73,9 @@ A provider swap is a configuration change that needs review of three things:
 - **Chunking limits.** An Azure block is at most 4000 MiB; an S3 part is at most 5 GiB, and every
   part but the last at least 5 MiB.
 
-Error classification is the adapter's most important job: Azure fails a missing key with
-`BlobNotFound`, while S3's `DeleteObject` answers 204, and the adapter maps both onto
-`ErrNotFound` or a successful delete.
+Error classification is the adapter's most important job. Azure fails a missing key with
+`BlobNotFound`, while S3's `DeleteObject` answers 204 for one. The adapter maps a missing key to
+`ErrNotFound` on a read or a stat, and to a successful delete on a delete, on every provider.
 
 ## The write path
 
@@ -82,5 +83,5 @@ No transaction spans a database and an object store. `Put` is all or nothing, wh
 consumer write in two phases: the owning row first, in a pending state; then the object; then the
 row marked available. Delete mirrors it. Writing the object first was rejected, because a failed
 insert then leaves an object that only a full container listing can find, while a pending row is
-an ordinary query. A crash between the two phases leaves a pending row, and nothing reconciles it
-yet. The row and its schema belong to the consumer.
+an ordinary query. A crash between the two phases leaves a pending row, and nothing reconciles it.
+The row and its schema belong to the consumer.

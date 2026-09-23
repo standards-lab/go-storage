@@ -29,7 +29,7 @@ the standard's principles it enhances are stated below. Its repository-level pri
   unchanged, and a declared size that disagrees with the body is such a failure. The
   `storagetest` suite proves each provider keeps this.
 
-The [design](docs/design.md) page records why the library is shaped the way it is.
+[docs/design.md](docs/design.md) explains why the library is shaped as it is.
 
 ## Packages
 
