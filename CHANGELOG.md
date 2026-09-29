@@ -7,6 +7,8 @@ only; each provider sub-module keeps its own.
 
 ## [Unreleased]
 
+## [v0.2.0] - 2026-09-29
+
 ### Added
 
 - `ErrContainerNotFound` — the sentinel for a missing container. Probe and every object
@@ -70,5 +72,6 @@ only; each provider sub-module keeps its own.
   entity-tag form and equal across `Put`, `Get`, `Stat`, and `List`. `Fake` enforces `Size`
   and reports a quoted ETag.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.2.0...HEAD
+[v0.2.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.1.0
