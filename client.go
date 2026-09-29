@@ -108,9 +108,11 @@ type Capabilities struct {
 // Classifying a provider's errors into this package's sentinels is the
 // provider adapter's job. Get and Stat return an error matching
 // [ErrNotFound] for a missing key. Delete is idempotent: deleting a missing
-// key is a no-op success, never [ErrNotFound]. Any method, EnsureContainer
-// and Probe included, may return an error matching [ErrUnavailable] when the
-// store is unreachable.
+// key is a no-op success, never [ErrNotFound]. Probe and every object
+// operation, Delete included, return an error matching
+// [ErrContainerNotFound] while the configured container does not exist. Any
+// method, EnsureContainer and Probe included, may return an error matching
+// [ErrUnavailable] when the store is unreachable.
 type Client interface {
 	// Put writes body as the object at key, replacing any existing object,
 	// and returns the stored object's metadata. Put is all or nothing: on

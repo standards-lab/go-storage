@@ -58,6 +58,59 @@ func Run(t *testing.T, newClient func(t *testing.T) storage.Client) {
 	}
 }
 
+// RunMissingContainer proves that a Client reports a missing container as
+// [storage.ErrContainerNotFound] and never as [storage.ErrNotFound]. newClient
+// returns a client wired to a container that does not exist; the suite never
+// calls EnsureContainer, so it creates nothing and leaves nothing behind.
+// Probe and each object operation, Delete included, must fail with an error
+// matching ErrContainerNotFound: deleting a missing key succeeds, but deleting
+// into a missing container is a fault in the store.
+func RunMissingContainer(t *testing.T, newClient func(t *testing.T) storage.Client) {
+	t.Helper()
+	checkMissingContainer(t, newClient(t))
+}
+
+func checkMissingContainer(t testing.TB, c storage.Client) {
+	t.Helper()
+	ctx := t.Context()
+	key := newPrefix(t) + "absent.txt"
+	ops := []struct {
+		name string
+		call func() error
+	}{
+		{"Probe", func() error { return c.Probe(ctx) }},
+		{"Put", func() error {
+			_, err := c.Put(ctx, key, strings.NewReader("x"), storage.PutOptions{Size: 1})
+			return err
+		}},
+		{"Get", func() error {
+			b, err := c.Get(ctx, key, storage.GetOptions{})
+			if err == nil {
+				_ = b.Body.Close()
+			}
+			return err
+		}},
+		{"Stat", func() error {
+			_, err := c.Stat(ctx, key)
+			return err
+		}},
+		{"Delete", func() error { return c.Delete(ctx, key) }},
+		{"List", func() error {
+			_, err := c.List(ctx, storage.ListOptions{})
+			return err
+		}},
+	}
+	for _, op := range ops {
+		err := op.call()
+		if !errors.Is(err, storage.ErrContainerNotFound) {
+			t.Errorf("%s without a container = %v, want ErrContainerNotFound", op.name, err)
+		}
+		if errors.Is(err, storage.ErrNotFound) {
+			t.Errorf("%s without a container = %v, want it not to match ErrNotFound", op.name, err)
+		}
+	}
+}
+
 // testCase is one contract behavior. check receives a client whose container
 // exists and a prefix every key it writes must start with.
 type testCase struct {

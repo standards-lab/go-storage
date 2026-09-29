@@ -450,8 +450,11 @@ func TestFake_EnsureContainerCreatesOnce(t *testing.T) {
 
 	for _, op := range ops {
 		err := op.call()
-		if !errors.Is(err, storage.ErrNotFound) {
-			t.Errorf("%s without a container = %v, want ErrNotFound", op.name, err)
+		if !errors.Is(err, storage.ErrContainerNotFound) {
+			t.Errorf("%s without a container = %v, want ErrContainerNotFound", op.name, err)
+		}
+		if errors.Is(err, storage.ErrNotFound) {
+			t.Errorf("%s without a container = %v, want it not to match ErrNotFound", op.name, err)
 		}
 		if !errors.Is(err, storagetest.ErrNoSuchContainer) {
 			t.Errorf("%s without a container = %v, want the cause to stay matchable", op.name, err)
@@ -543,8 +546,8 @@ func TestFake_DropContainer(t *testing.T) {
 	if f.HasContainer() {
 		t.Error("HasContainer() = true after DropContainer, want false")
 	}
-	if err := f.Probe(ctx); !errors.Is(err, storage.ErrNotFound) || !errors.Is(err, storagetest.ErrNoSuchContainer) {
-		t.Errorf("Probe after DropContainer = %v, want ErrNotFound wrapping ErrNoSuchContainer", err)
+	if err := f.Probe(ctx); !errors.Is(err, storage.ErrContainerNotFound) || !errors.Is(err, storagetest.ErrNoSuchContainer) {
+		t.Errorf("Probe after DropContainer = %v, want ErrContainerNotFound wrapping ErrNoSuchContainer", err)
 	}
 
 	// The container comes back empty: the drop took its objects with it.

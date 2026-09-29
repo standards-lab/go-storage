@@ -12,6 +12,13 @@ var (
 	// key is a no-op success.
 	ErrNotFound = errors.New("storage object not found")
 
+	// ErrContainerNotFound reports that the configured container does not
+	// exist. Probe and every object operation return it while the container
+	// is missing, Delete included, and it never matches [ErrNotFound]: a
+	// missing container is a fault in the store, not an absent object.
+	// EnsureContainer corrects it.
+	ErrContainerNotFound = errors.New("storage container not found")
+
 	// ErrTooLarge reports a Put body that exceeds Config.MaxObjectSize.
 	// [Store] rejects the body before it reaches the provider.
 	ErrTooLarge = errors.New("storage object too large")

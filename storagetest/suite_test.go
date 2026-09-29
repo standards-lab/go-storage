@@ -32,3 +32,9 @@ func TestRun_Store(t *testing.T) {
 		return s
 	})
 }
+
+func TestRunMissingContainer_Fake(t *testing.T) {
+	storagetest.RunMissingContainer(t, func(*testing.T) storage.Client {
+		return storagetest.NewFake(storagetest.WithoutContainer())
+	})
+}

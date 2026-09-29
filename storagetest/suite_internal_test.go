@@ -263,3 +263,27 @@ func TestCases_CatchBrokenClients(t *testing.T) {
 		})
 	}
 }
+
+// notFoundContainer reports a missing container the way v0.1.0 providers
+// did, as a missing object, which the missing-container check must reject.
+type notFoundContainer struct{ *Fake }
+
+func (c notFoundContainer) Probe(ctx context.Context) error {
+	return fmt.Errorf("%w: container gone", storage.ErrNotFound)
+}
+
+func TestCheckMissingContainer_RejectsErrNotFound(t *testing.T) {
+	rec := &recorder{TB: t}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		checkMissingContainer(rec, notFoundContainer{NewFake(WithoutContainer())})
+	}()
+	<-done
+	if !rec.Failed() {
+		t.Fatal("checkMissingContainer passed a Probe that reports ErrNotFound, want a failure")
+	}
+	if got := rec.Failures(); !strings.Contains(got, "Probe") || strings.Contains(got, "Stat") {
+		t.Errorf("failures = %q, want only Probe's", got)
+	}
+}
