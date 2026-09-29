@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/standards-lab/go-core/config"
@@ -41,6 +42,8 @@ type Config struct {
 	Key string `json:"key"`
 
 	// Options carries provider-specific settings that the provider reads.
+	// Each takes an environment override named for its key under
+	// Env.Options.
 	Options map[string]string `json:"options"`
 
 	// MaxObjectSize is the largest body [Store] accepts in a Put, in bytes.
@@ -141,7 +144,28 @@ func (c *Config) applyEnv() error {
 		}
 		c.ListPageSize = n
 	}
+	c.applyOptionsEnv()
 	return config.SetDurationFromEnv(&c.RequestTimeout, c.Env.RequestTimeout)
+}
+
+// applyOptionsEnv sets each provider option an Env.Options_<KEY> variable
+// names, under the lower-cased key, over the configured value. An empty
+// value is ignored, as every other override's is.
+func (c *Config) applyOptionsEnv() {
+	if c.Env.Options == "" {
+		return
+	}
+	prefix := c.Env.Options + "_"
+	for _, kv := range os.Environ() {
+		name, v, ok := strings.Cut(kv, "=")
+		if !ok || v == "" || !strings.HasPrefix(name, prefix) || len(name) == len(prefix) {
+			continue
+		}
+		if c.Options == nil {
+			c.Options = map[string]string{}
+		}
+		c.Options[strings.ToLower(strings.TrimPrefix(name, prefix))] = v
+	}
 }
 
 // finalized reports whether Finalize ran. RequestTimeout is the one pointer

@@ -7,6 +7,15 @@ only; each provider sub-module keeps its own.
 
 ## [Unreleased]
 
+## [v0.2.1] - 2026-09-29
+
+### Added
+
+- Provider options take environment overrides: each `<PREFIX>_STORAGE_OPTIONS_<KEY>` variable
+  sets the option `<key>`, lower-cased, over the configured value, so a deployment tunes a
+  provider (`APP_STORAGE_OPTIONS_MAX_RETRIES` for azureblob's `max_retries`) without a
+  configuration file. `Env.Options` records the prefix.
+
 ## [v0.2.0] - 2026-09-29
 
 ### Added
@@ -72,6 +81,7 @@ only; each provider sub-module keeps its own.
   entity-tag form and equal across `Put`, `Get`, `Stat`, and `List`. `Fake` enforces `Size`
   and reports a quoted ETag.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.2.1...HEAD
+[v0.2.1]: https://github.com/standards-lab/go-storage/releases/tag/v0.2.1
 [v0.2.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.1.0

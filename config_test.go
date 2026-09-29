@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,6 +178,34 @@ func TestConfig_FinalizeEnvOverrides(t *testing.T) {
 	}
 }
 
+// Each APP_STORAGE_OPTIONS_<KEY> variable sets the provider option <key>,
+// lower-cased, over the file's value and beside the file's other options;
+// an empty value and a bare prefix set nothing.
+func TestConfig_FinalizeOptionsEnv(t *testing.T) {
+	cfg := validConfig()
+	cfg.Options = map[string]string{"max_retries": "4", "block_size": "1048576"}
+	t.Setenv("TEST_STORAGE_OPTIONS_MAX_RETRIES", "1")
+	t.Setenv("TEST_STORAGE_OPTIONS_CONCURRENCY", "2")
+	t.Setenv("TEST_STORAGE_OPTIONS_TRY_TIMEOUT", "")
+	t.Setenv("TEST_STORAGE_OPTIONS_", "ignored")
+
+	if err := cfg.Finalize("test"); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	want := map[string]string{"max_retries": "1", "block_size": "1048576", "concurrency": "2"}
+	if !maps.Equal(cfg.Options, want) {
+		t.Errorf("Options = %v, want %v", cfg.Options, want)
+	}
+
+	bare := validConfig()
+	if err := bare.Finalize("test"); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if bare.Options["max_retries"] != "1" {
+		t.Errorf("Options = %v over a config with none, want max_retries from the environment", bare.Options)
+	}
+}
+
 func TestConfig_FinalizeMalformedEnvFails(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -206,6 +235,7 @@ func TestConfig_FinalizeMalformedEnvFails(t *testing.T) {
 func TestConfig_FinalizeZeroEnvDisablesOverrides(t *testing.T) {
 	// The zero Env names no variables, so ambient values cannot leak in.
 	t.Setenv("TEST_STORAGE_CONTAINER", "assets_test")
+	t.Setenv("TEST_STORAGE_OPTIONS_MAX_RETRIES", "1")
 	t.Setenv("TEST_STORAGE_REQUEST_TIMEOUT", "3s")
 
 	cfg := validConfig()
@@ -217,6 +247,9 @@ func TestConfig_FinalizeZeroEnvDisablesOverrides(t *testing.T) {
 	}
 	if cfg.RequestTimeout.Duration() != 10*time.Second {
 		t.Errorf("RequestTimeout = %s with zero Env, want 10s", cfg.RequestTimeout)
+	}
+	if len(cfg.Options) != 0 {
+		t.Errorf("Options = %v with zero Env, want none", cfg.Options)
 	}
 }
 
