@@ -5,7 +5,7 @@ go 1.27
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.1
-	github.com/standards-lab/go-storage v0.1.0
+	github.com/standards-lab/go-storage v0.2.0
 )
 
 require (
@@ -23,6 +23,3 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 )
-
-// Transient: azureblob builds against the unreleased base; the release removes this.
-replace github.com/standards-lab/go-storage => ../

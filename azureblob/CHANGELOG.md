@@ -8,8 +8,11 @@ sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.2.0] - 2026-09-29
+
 ### Changed
 
+- The `go-storage` requirement is v0.2.0, which adds `storage.ErrContainerNotFound`.
 - **Breaking:** a `ContainerNotFound` answer now matches `storage.ErrContainerNotFound` instead of
   `storage.ErrNotFound`, on `Probe` and every object operation, `Delete` included. A
   `BlobNotFound` answer still matches `storage.ErrNotFound`. The acceptance run adds
@@ -58,5 +61,6 @@ sub-module only; the base module keeps its own.
   against a real service, gated on `AZUREBLOB_TEST_ENDPOINT` so they skip on the unit tier.
 - Requires `github.com/standards-lab/go-storage` v0.1.0.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/azureblob/v0.1.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/azureblob/v0.2.0...HEAD
+[v0.2.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.1.0
