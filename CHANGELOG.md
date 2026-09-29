@@ -11,12 +11,12 @@ only; each provider sub-module keeps its own.
 
 ### Added
 
-- Provider options take environment overrides: each `<PREFIX>_STORAGE_OPTIONS_<KEY>` variable
-  sets the option `<key>`, lower-cased, over the configured value, so a deployment tunes a
-  provider (`APP_STORAGE_OPTIONS_MAX_RETRIES` for azureblob's `max_retries`) without a
-  configuration file. `Env.Options` records the prefix. `KEY` is upper-case letters, digits, and
-  underscores; the provider parses the value when it is constructed, so a malformed one fails
-  there, not in `Finalize`.
+- Provider options take environment overrides, so a deployment can tune a provider without a
+  configuration file. Each `<PREFIX>_STORAGE_OPTIONS_<KEY>` variable sets the option named by the
+  lower-cased `KEY`, replacing the configured value: `APP_STORAGE_OPTIONS_MAX_RETRIES` sets
+  azureblob's `max_retries`. `KEY` consists of upper-case letters, digits, and underscores.
+  `Env.Options` records the `<PREFIX>_STORAGE_OPTIONS` prefix. The provider parses the value when
+  it is constructed, so a malformed value fails there, not in `Finalize`.
 
 ## [v0.2.0] - 2026-09-29
 

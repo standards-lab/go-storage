@@ -6,9 +6,10 @@ import "github.com/standards-lab/go-core/config"
 // prefix "app", the names are APP_STORAGE_ENDPOINT, APP_STORAGE_CONTAINER,
 // APP_STORAGE_ACCOUNT, APP_STORAGE_KEY, APP_STORAGE_MAX_OBJECT_SIZE,
 // APP_STORAGE_LIST_PAGE_SIZE, and APP_STORAGE_REQUEST_TIMEOUT. Options is a
-// prefix rather than a name: each variable APP_STORAGE_OPTIONS_<KEY> sets
-// the provider option <key>, lower-cased, so APP_STORAGE_OPTIONS_MAX_RETRIES
-// sets max_retries; KEY is upper-case, and the provider parses the value
+// prefix rather than a full name: each variable APP_STORAGE_OPTIONS_<KEY>
+// sets the provider option named by the lower-cased KEY, so
+// APP_STORAGE_OPTIONS_MAX_RETRIES sets max_retries. KEY consists of
+// upper-case letters, digits, and underscores. The provider parses the value
 // when it is constructed. An empty name disables that one override. Finalize
 // populates Env and exposes it for introspection.
 type Env struct {
