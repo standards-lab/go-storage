@@ -19,10 +19,11 @@ import (
 //
 // A service response (an *azcore.ResponseError) is classified by its error
 // code and status: BlobNotFound matches storage.ErrNotFound,
-// ContainerNotFound matches storage.ErrContainerNotFound, and a 5xx status or one of the retryable codes
-// ServerBusy, OperationTimedOut, and InternalError matches
-// storage.ErrUnavailable. Every other response, an authentication or
-// authorization failure included, is returned unclassified.
+// ContainerNotFound matches storage.ErrContainerNotFound, and a 5xx status
+// or one of the retryable codes ServerBusy, OperationTimedOut, and
+// InternalError matches storage.ErrUnavailable. Every other response, an
+// authentication or authorization failure included, is returned
+// unclassified.
 //
 // An error with no response is a transport failure: a refused connection, a
 // DNS failure, or a deadline the SDK's retry policy consumed. Each matches

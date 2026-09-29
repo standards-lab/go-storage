@@ -111,7 +111,8 @@
 // missing blob matches storage.ErrNotFound. [Client.Delete] treats the
 // service's BlobNotFound answer as the idempotent success the contract asks
 // for. A missing container is not swallowed: it matches
-// storage.ErrContainerNotFound, because it says the configured target is gone rather than that the key is.
+// storage.ErrContainerNotFound, because it says the configured target is
+// gone rather than that the key is.
 //
 // [Client.List] fetches one page of the container's flat listing per call.
 // ListOptions.Prefix, Token, and Limit map to the request's prefix, marker,

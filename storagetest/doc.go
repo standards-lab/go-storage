@@ -37,9 +37,8 @@
 // holds other objects. The Fake passes the suite, and the package's own tests
 // prove that a client which breaks the contract fails it.
 //
-// [RunMissingContainer] proves the other half of the container contract: a
-// client wired to a container that does not exist reports it as
-// storage.ErrContainerNotFound, never storage.ErrNotFound, on Probe and on
-// every object operation. It never creates the container, so it needs no
-// cleanup.
+// [RunMissingContainer] proves that a client wired to a container that does
+// not exist reports it as storage.ErrContainerNotFound, never
+// storage.ErrNotFound, on Probe and on every object operation. It never
+// creates the container, so it needs no cleanup.
 package storagetest

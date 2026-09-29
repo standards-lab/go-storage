@@ -54,8 +54,8 @@ var (
 // and Probe included, fails with an error matching storage.ErrUnavailable
 // that wraps ErrDown. The container is modelled too: while it does not
 // exist, Probe and every object operation fail with an error matching
-// storage.ErrContainerNotFound that wraps ErrNoSuchContainer, and EnsureContainer
-// creates it. A Fake starts with its container in place unless
+// storage.ErrContainerNotFound that wraps ErrNoSuchContainer, and
+// EnsureContainer creates it. A Fake starts with its container in place unless
 // WithoutContainer says otherwise, and DropContainer removes it again.
 //
 // A Fake is safe for concurrent use. A test that embeds *Fake in its own
@@ -173,8 +173,8 @@ func (f *Fake) FailPut(err error) {
 
 // DropContainer removes the container and every object in it, as if it had
 // been deleted out from under the client. Probe and the object operations
-// then fail with storage.ErrContainerNotFound until EnsureContainer creates it again,
-// empty.
+// then fail with storage.ErrContainerNotFound until EnsureContainer creates
+// it again, empty.
 func (f *Fake) DropContainer() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
