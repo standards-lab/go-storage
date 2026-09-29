@@ -263,3 +263,77 @@ func TestCases_CatchBrokenClients(t *testing.T) {
 		})
 	}
 }
+
+// notFoundContainer reports a missing container the way v0.1.0 providers
+// did, as a missing object, which the missing-container check must reject.
+type notFoundContainer struct{ *Fake }
+
+func (c notFoundContainer) Probe(ctx context.Context) error {
+	return fmt.Errorf("%w: container gone", storage.ErrNotFound)
+}
+
+// swallowsContainer treats a missing container on Delete as the idempotent
+// success of a missing key, the likeliest regression.
+type swallowsContainer struct{ *Fake }
+
+func (c swallowsContainer) Delete(context.Context, string) error { return nil }
+
+// createsContainer creates its container on a Put, as a provider that
+// provisions on demand would.
+type createsContainer struct{ *Fake }
+
+func (c createsContainer) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
+	if err := c.EnsureContainer(ctx); err != nil {
+		return storage.Object{}, err
+	}
+	return c.Fake.Put(ctx, key, body, opts)
+}
+
+// checkMissing runs the missing-container check over c through a recorder.
+func checkMissing(t *testing.T, c storage.Client) *recorder {
+	t.Helper()
+	rec := &recorder{TB: t}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		checkMissingContainer(rec, c)
+	}()
+	<-done
+	return rec
+}
+
+func TestCheckMissingContainer_RejectsBrokenClients(t *testing.T) {
+	tests := []struct {
+		name   string
+		client storage.Client
+		op     string
+	}{
+		{"a Probe that reports ErrNotFound", notFoundContainer{NewFake(WithoutContainer())}, "Probe"},
+		{"a Delete that swallows the missing container", swallowsContainer{NewFake(WithoutContainer())}, "Delete"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := checkMissing(t, tc.client)
+			if !rec.Failed() {
+				t.Fatalf("checkMissingContainer passed %s, want a failure", tc.name)
+			}
+			if got := rec.Failures(); !strings.HasPrefix(got, tc.op) || strings.Contains(got, "Stat") {
+				t.Errorf("failures = %q, want only %s's", got, tc.op)
+			}
+		})
+	}
+}
+
+// A client whose Put creates the container fails the check, and the object
+// it stored is deleted when the test ends.
+func TestCheckMissingContainer_CleansUpAStrayPut(t *testing.T) {
+	f := NewFake(WithoutContainer())
+	t.Run("check", func(t *testing.T) {
+		if rec := checkMissing(t, createsContainer{f}); !rec.Failed() {
+			t.Fatal("checkMissingContainer passed a Put that created the container, want a failure")
+		}
+	})
+	if page, err := f.List(context.Background(), storage.ListOptions{}); err != nil || len(page.Objects) != 0 {
+		t.Errorf("after the check the store lists %+v, %v, want nothing left", page.Objects, err)
+	}
+}

@@ -38,8 +38,8 @@ var (
 	// key it does not hold.
 	ErrNoSuchKey = errors.New("storagetest: no such key")
 
-	// ErrNoSuchContainer is the cause a Fake wraps under storage.ErrNotFound
-	// while its container does not exist.
+	// ErrNoSuchContainer is the cause a Fake wraps under
+	// storage.ErrContainerNotFound while its container does not exist.
 	ErrNoSuchContainer = errors.New("storagetest: no such container")
 )
 
@@ -54,8 +54,8 @@ var (
 // and Probe included, fails with an error matching storage.ErrUnavailable
 // that wraps ErrDown. The container is modelled too: while it does not
 // exist, Probe and every object operation fail with an error matching
-// storage.ErrNotFound that wraps ErrNoSuchContainer, and EnsureContainer
-// creates it. A Fake starts with its container in place unless
+// storage.ErrContainerNotFound that wraps ErrNoSuchContainer, and
+// EnsureContainer creates it. A Fake starts with its container in place unless
 // WithoutContainer says otherwise, and DropContainer removes it again.
 //
 // A Fake is safe for concurrent use. A test that embeds *Fake in its own
@@ -173,8 +173,8 @@ func (f *Fake) FailPut(err error) {
 
 // DropContainer removes the container and every object in it, as if it had
 // been deleted out from under the client. Probe and the object operations
-// then fail with storage.ErrNotFound until EnsureContainer creates it again,
-// empty.
+// then fail with storage.ErrContainerNotFound until EnsureContainer creates
+// it again, empty.
 func (f *Fake) DropContainer() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -240,7 +240,7 @@ func (f *Fake) unavailable() error {
 }
 
 func (f *Fake) noContainer() error {
-	return fmt.Errorf("%w: %w", storage.ErrNotFound, ErrNoSuchContainer)
+	return fmt.Errorf("%w: %w", storage.ErrContainerNotFound, ErrNoSuchContainer)
 }
 
 // Put reads body to EOF and stores a copy under key, replacing any existing

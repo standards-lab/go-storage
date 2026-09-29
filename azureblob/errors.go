@@ -18,11 +18,12 @@ import (
 // and an error that already matches a sentinel is returned unchanged.
 //
 // A service response (an *azcore.ResponseError) is classified by its error
-// code and status: BlobNotFound and ContainerNotFound match
-// storage.ErrNotFound, and a 5xx status or one of the retryable codes
-// ServerBusy, OperationTimedOut, and InternalError matches
-// storage.ErrUnavailable. Every other response, an authentication or
-// authorization failure included, is returned unclassified.
+// code and status: BlobNotFound matches storage.ErrNotFound,
+// ContainerNotFound matches storage.ErrContainerNotFound, and a 5xx status
+// or one of the retryable codes ServerBusy, OperationTimedOut, and
+// InternalError matches storage.ErrUnavailable. Every other response, an
+// authentication or authorization failure included, is returned
+// unclassified.
 //
 // An error with no response is a transport failure: a refused connection, a
 // DNS failure, or a deadline the SDK's retry policy consumed. Each matches
@@ -35,7 +36,8 @@ func classify(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, storage.ErrNotFound) || errors.Is(err, storage.ErrUnavailable) {
+	if errors.Is(err, storage.ErrNotFound) || errors.Is(err, storage.ErrContainerNotFound) ||
+		errors.Is(err, storage.ErrUnavailable) {
 		return err
 	}
 
@@ -48,7 +50,9 @@ func classify(err error) error {
 	}
 
 	switch {
-	case bloberror.HasCode(err, bloberror.BlobNotFound, bloberror.ContainerNotFound):
+	case bloberror.HasCode(err, bloberror.ContainerNotFound):
+		return fmt.Errorf("%w: %w", storage.ErrContainerNotFound, err)
+	case bloberror.HasCode(err, bloberror.BlobNotFound):
 		return fmt.Errorf("%w: %w", storage.ErrNotFound, err)
 	case respErr.StatusCode >= http.StatusInternalServerError,
 		bloberror.HasCode(err, bloberror.ServerBusy, bloberror.OperationTimedOut, bloberror.InternalError):

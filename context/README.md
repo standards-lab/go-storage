@@ -17,7 +17,8 @@ Every package below is built, and its code and `doc.go` are authoritative. Detai
 unbuilt is added when it is about to be built.
 
 - **The standard tier, `Store`, and `Config`**: the base module.
-- **`storagetest`**: the in-memory `Fake` and the `Run` conformance suite.
+- **`storagetest`**: the in-memory `Fake` and the `Run` and `RunMissingContainer` conformance
+  checks.
 - **`azureblob`**: the Azure Blob Storage provider sub-module.
 
 ## Known limits of the adapter

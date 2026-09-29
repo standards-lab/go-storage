@@ -123,10 +123,13 @@
 //
 // # Errors
 //
-// [ErrNotFound], [ErrTooLarge], [ErrNotReady], and [ErrUnavailable] classify
-// the service conditions. Each is wrapped in the dual form
-// fmt.Errorf("%w: %w", sentinel, err), so errors.Is classifies while the
-// provider's error stays recoverable. Classifying a provider's errors into
-// the sentinels is the adapter's job. Get and Stat of a missing key match
-// [ErrNotFound], and Delete of a missing key succeeds.
+// [ErrNotFound], [ErrContainerNotFound], [ErrTooLarge], [ErrNotReady], and
+// [ErrUnavailable] classify the service conditions. Each is wrapped in the
+// dual form fmt.Errorf("%w: %w", sentinel, err), so errors.Is classifies
+// while the provider's error stays recoverable. Classifying a provider's
+// errors into the sentinels is the adapter's job. Get and Stat of a missing
+// key match [ErrNotFound], and Delete of a missing key succeeds. A missing
+// container matches [ErrContainerNotFound] on Probe and every object
+// operation, and never [ErrNotFound], so a consumer can tell an absent
+// object from a store that has lost its container.
 package storage

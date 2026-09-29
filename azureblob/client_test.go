@@ -122,8 +122,8 @@ func TestProbe_ContainerNotFound(t *testing.T) {
 	c := newClient(t, testConfig(t, svc.endpoint(), nil))
 
 	err := c.Probe(t.Context())
-	if !errors.Is(err, storage.ErrNotFound) {
-		t.Fatalf("Probe = %v, want ErrNotFound", err)
+	if !errors.Is(err, storage.ErrContainerNotFound) || errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("Probe = %v, want ErrContainerNotFound and not ErrNotFound", err)
 	}
 	var respErr *azcore.ResponseError
 	if !errors.As(err, &respErr) || respErr.ErrorCode != "ContainerNotFound" {

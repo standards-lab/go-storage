@@ -74,7 +74,11 @@ A provider swap is a configuration change, reviewed for three differences:
 
 Error classification is the adapter's most important job. Azure fails a missing key with
 `BlobNotFound`, while S3's `DeleteObject` answers 204 for one. The adapter maps a missing key to
-`ErrNotFound` on a read or a stat, and to a successful delete on a delete, on every provider.
+`ErrNotFound` on a read or a stat, and to a successful delete on a delete, on every provider. A
+missing container is not a missing key: `Probe` and every object operation report it as
+`ErrContainerNotFound`, which never matches `ErrNotFound`, so a consumer serves an absent object as
+a 404 and a lost container as an outage. `storagetest.RunMissingContainer` proves the
+classification for each provider.
 
 ## The write path
 
