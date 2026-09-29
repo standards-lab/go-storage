@@ -167,7 +167,7 @@ func (c *Client) EnsureContainer(ctx context.Context) error {
 
 // Probe reads the container's properties, which proves that the endpoint is
 // reachable, the credential signs, and the container exists. A missing
-// container matches storage.ErrNotFound.
+// container matches storage.ErrContainerNotFound.
 func (c *Client) Probe(ctx context.Context) error {
 	_, err := c.container.GetProperties(ctx, nil)
 	return classify(err)

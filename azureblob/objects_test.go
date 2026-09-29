@@ -485,7 +485,7 @@ func TestDelete(t *testing.T) {
 	}{
 		{"accepted", status(http.StatusAccepted), nil},
 		{"blob not found", failWith(http.StatusNotFound, "BlobNotFound"), nil},
-		{"container not found", failWith(http.StatusNotFound, "ContainerNotFound"), storage.ErrNotFound},
+		{"container not found", failWith(http.StatusNotFound, "ContainerNotFound"), storage.ErrContainerNotFound},
 		{"server error", failWith(http.StatusInternalServerError, "InternalError"), storage.ErrUnavailable},
 	}
 	for _, tc := range cases {
@@ -659,7 +659,7 @@ func TestList_Errors(t *testing.T) {
 		respond http.HandlerFunc
 		want    error
 	}{
-		{"container not found", failWith(http.StatusNotFound, "ContainerNotFound"), storage.ErrNotFound},
+		{"container not found", failWith(http.StatusNotFound, "ContainerNotFound"), storage.ErrContainerNotFound},
 		{"server error", failWith(http.StatusInternalServerError, "InternalError"), storage.ErrUnavailable},
 	}
 	for _, tc := range cases {

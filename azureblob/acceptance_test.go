@@ -78,6 +78,15 @@ func TestAcceptance_Conformance(t *testing.T) {
 	})
 }
 
+// TestAcceptance_MissingContainer runs the missing-container check against a
+// real service, over a container the test names and never creates.
+func TestAcceptance_MissingContainer(t *testing.T) {
+	cfg := acceptanceConfig(t)
+	storagetest.RunMissingContainer(t, func(t *testing.T) storage.Client {
+		return newClient(t, cfg)
+	})
+}
+
 // TestAcceptance_StoreStart drives storage.Store over the provider against an
 // empty service: Start creates the container and reports ready, and the
 // object operations round-trip through the Store. It logs the ETag and

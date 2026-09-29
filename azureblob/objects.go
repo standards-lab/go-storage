@@ -117,7 +117,7 @@ func (c *Client) Stat(ctx context.Context, key string) (storage.Object, error) {
 
 // Delete removes the blob at key. The service's BlobNotFound answer is the
 // idempotent success the Client contract asks for. A missing container is not
-// swallowed: it still matches storage.ErrNotFound, because it says the
+// swallowed: it matches storage.ErrContainerNotFound, because it says the
 // configured target is gone rather than that this key is.
 func (c *Client) Delete(ctx context.Context, key string) error {
 	_, err := c.container.NewBlobClient(key).Delete(ctx, nil)

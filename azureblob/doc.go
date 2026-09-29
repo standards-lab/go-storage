@@ -70,7 +70,7 @@
 // service's ContainerAlreadyExists answer as success, so it is idempotent.
 // [Client.Probe] reads the container's properties, which proves the
 // endpoint, the credential, and the container together; a missing container
-// matches storage.ErrNotFound.
+// matches storage.ErrContainerNotFound.
 //
 // # Object operations
 //
@@ -110,8 +110,8 @@
 // blob's properties. Both build the Object from the response headers, and a
 // missing blob matches storage.ErrNotFound. [Client.Delete] treats the
 // service's BlobNotFound answer as the idempotent success the contract asks
-// for. A missing container is not swallowed: it matches storage.ErrNotFound,
-// because it says the configured target is gone rather than that the key is.
+// for. A missing container is not swallowed: it matches
+// storage.ErrContainerNotFound, because it says the configured target is gone rather than that the key is.
 //
 // [Client.List] fetches one page of the container's flat listing per call.
 // ListOptions.Prefix, Token, and Limit map to the request's prefix, marker,
@@ -162,7 +162,8 @@
 // Every method classifies the SDK's error into the storage package's
 // sentinels in the dual form fmt.Errorf("%w: %w", sentinel, err), so
 // errors.Is classifies while errors.As still reaches the SDK's
-// *azcore.ResponseError. A BlobNotFound or ContainerNotFound answer matches
+// *azcore.ResponseError. A BlobNotFound answer matches storage.ErrNotFound,
+// and a ContainerNotFound answer matches storage.ErrContainerNotFound, never
 // storage.ErrNotFound. A 5xx answer, the retryable ServerBusy,
 // OperationTimedOut, and InternalError codes, and any failure with no
 // response at all (a refused connection, a DNS failure, or a deadline that

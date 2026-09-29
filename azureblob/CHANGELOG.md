@@ -8,6 +8,13 @@ sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** a `ContainerNotFound` answer now matches `storage.ErrContainerNotFound` instead of
+  `storage.ErrNotFound`, on `Probe` and every object operation, `Delete` included. A
+  `BlobNotFound` answer still matches `storage.ErrNotFound`. The acceptance run adds
+  `storagetest.RunMissingContainer` against Azurite.
+
 ## [v0.1.0] - 2026-09-18
 
 ### Added

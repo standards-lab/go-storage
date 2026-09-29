@@ -22,6 +22,7 @@ func TestClassify(t *testing.T) {
 	transport := &url.Error{Op: "Get", URL: "http://127.0.0.1:1/x", Err: &net.OpError{Op: "dial", Err: errors.New("connection refused")}}
 	alreadyNotFound := fmt.Errorf("%w: %w", storage.ErrNotFound, responseError(http.StatusNotFound, "BlobNotFound"))
 	alreadyUnavailable := fmt.Errorf("%w: %w", storage.ErrUnavailable, transport)
+	alreadyContainer := fmt.Errorf("%w: %w", storage.ErrContainerNotFound, responseError(http.StatusNotFound, "ContainerNotFound"))
 
 	cases := []struct {
 		name string
@@ -31,7 +32,7 @@ func TestClassify(t *testing.T) {
 	}{
 		{"nil", nil, nil, true},
 		{"blob not found", responseError(http.StatusNotFound, "BlobNotFound"), storage.ErrNotFound, false},
-		{"container not found", responseError(http.StatusNotFound, "ContainerNotFound"), storage.ErrNotFound, false},
+		{"container not found", responseError(http.StatusNotFound, "ContainerNotFound"), storage.ErrContainerNotFound, false},
 		{"404 with another code", responseError(http.StatusNotFound, "ResourceNotFound"), nil, true},
 		{"500", responseError(http.StatusInternalServerError, ""), storage.ErrUnavailable, false},
 		{"502", responseError(http.StatusBadGateway, ""), storage.ErrUnavailable, false},
@@ -49,6 +50,7 @@ func TestClassify(t *testing.T) {
 		{"wrapped cancelled", &url.Error{Op: "Get", Err: context.Canceled}, nil, true},
 		{"already not found", alreadyNotFound, storage.ErrNotFound, true},
 		{"already unavailable", alreadyUnavailable, storage.ErrUnavailable, true},
+		{"already container not found", alreadyContainer, storage.ErrContainerNotFound, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -59,8 +61,12 @@ func TestClassify(t *testing.T) {
 			if tc.want != nil && !errors.Is(got, tc.want) {
 				t.Fatalf("classify(%v) = %v, want %v", tc.err, got, tc.want)
 			}
-			if tc.want == nil && (errors.Is(got, storage.ErrNotFound) || errors.Is(got, storage.ErrUnavailable)) {
+			if tc.want == nil && (errors.Is(got, storage.ErrNotFound) || errors.Is(got, storage.ErrContainerNotFound) ||
+				errors.Is(got, storage.ErrUnavailable)) {
 				t.Fatalf("classify(%v) = %v, want it unclassified", tc.err, got)
+			}
+			if tc.want != storage.ErrNotFound && errors.Is(got, storage.ErrNotFound) { //nolint:errorlint // comparing sentinels
+				t.Fatalf("classify(%v) = %v, want it not to match ErrNotFound", tc.err, got)
 			}
 			if tc.err != nil && !errors.Is(got, tc.err) {
 				t.Fatalf("classify(%v) = %v, want the cause still matchable", tc.err, got)
