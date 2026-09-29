@@ -23,3 +23,6 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 )
+
+// Transient: azureblob builds against the unreleased base; the release removes this.
+replace github.com/standards-lab/go-storage => ../

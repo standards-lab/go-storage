@@ -13,9 +13,13 @@ and no live Azure account has run it:
 - **The listing marker.** The adapter passes `NextMarker` back verbatim and never reads it.
   Azurite's is the last key of the page, and Azure's is documented as an opaque token.
 
-No S3 provider exists, so two claims the standard tier rests on are unexercised:
+No S3 provider exists, so three claims the standard tier rests on are unexercised:
 
 - **`CreateBucket`'s existing-bucket result.** `EnsureContainer` needs `CreateBucket` to report an
   existing bucket distinguishably.
 - **Multipart visibility.** The all-or-nothing `Put` needs a multipart upload to stay invisible
   until it commits.
+- **A missing bucket on `Stat`.** The contract has `Stat` report a missing container as
+  `ErrContainerNotFound`. S3's `HeadObject` answers a missing bucket with a bare 404 whose code
+  cannot be told from a missing key's, so an S3 adapter needs a `HeadBucket` on a 404 to classify
+  it. `GetObject`, `DeleteObject`, and `ListObjectsV2` name `NoSuchBucket` themselves.

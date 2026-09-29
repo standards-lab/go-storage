@@ -61,7 +61,10 @@ func Run(t *testing.T, newClient func(t *testing.T) storage.Client) {
 // RunMissingContainer proves that a Client reports a missing container as
 // [storage.ErrContainerNotFound] and never as [storage.ErrNotFound]. newClient
 // returns a client wired to a container that does not exist; the suite never
-// calls EnsureContainer, so it creates nothing and leaves nothing behind.
+// calls EnsureContainer, so over a conforming client it creates nothing and
+// leaves nothing behind. A client whose Put succeeds anyway, as one that
+// creates its container on demand would, fails the check, and the object it
+// stored is deleted when the test ends.
 // Probe and each object operation, Delete included, must fail with an error
 // matching ErrContainerNotFound: deleting a missing key succeeds, but deleting
 // into a missing container is a fault in the store.
@@ -81,6 +84,9 @@ func checkMissingContainer(t testing.TB, c storage.Client) {
 		{"Probe", func() error { return c.Probe(ctx) }},
 		{"Put", func() error {
 			_, err := c.Put(ctx, key, strings.NewReader("x"), storage.PutOptions{Size: 1})
+			if err == nil {
+				deleteOnCleanup(t, c, key)
+			}
 			return err
 		}},
 		{"Get", func() error {

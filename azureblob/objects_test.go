@@ -477,6 +477,38 @@ func TestStat_NotFound(t *testing.T) {
 	}
 }
 
+// A missing container is ErrContainerNotFound, never ErrNotFound, on the
+// put, the read, and the HEAD a stat sends, whose code arrives in the
+// x-ms-error-code header alone.
+func TestObjects_ContainerNotFound(t *testing.T) {
+	ops := map[string]func(c *azureblob.Client) error{
+		"Put": func(c *azureblob.Client) error {
+			_, err := c.Put(t.Context(), "k", strings.NewReader("x"), storage.PutOptions{Size: 1})
+			return err
+		},
+		"Get": func(c *azureblob.Client) error {
+			blob, err := c.Get(t.Context(), "k", storage.GetOptions{})
+			if err == nil {
+				_ = blob.Body.Close()
+			}
+			return err
+		},
+		"Stat": func(c *azureblob.Client) error {
+			_, err := c.Stat(t.Context(), "k")
+			return err
+		},
+	}
+	for name, op := range ops {
+		t.Run(name, func(t *testing.T) {
+			svc := newService(t, failWith(http.StatusNotFound, "ContainerNotFound"))
+			err := op(newClient(t, testConfig(t, svc.endpoint(), nil)))
+			if !errors.Is(err, storage.ErrContainerNotFound) || errors.Is(err, storage.ErrNotFound) {
+				t.Fatalf("%s without a container = %v, want ErrContainerNotFound and not ErrNotFound", name, err)
+			}
+		})
+	}
+}
+
 func TestDelete(t *testing.T) {
 	cases := []struct {
 		name    string

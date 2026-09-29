@@ -38,7 +38,8 @@ the standard's principles it enhances are stated below. Its repository-level pri
   and `Store`, the lifecycle wrapper that implements `Client` and enforces the size bound and a
   declared body size.
 - `storagetest` (a package of the base module) — an in-memory `Fake` client for hermetic tests
-  and `Run`, the conformance suite a provider runs against its own `Client`.
+  and `Run` and `RunMissingContainer`, the conformance checks a provider runs against its own
+  `Client`.
 - `azureblob` (a sub-module) — the Azure Blob Storage provider, over the Azure SDK for Go's
   `azblob` module and authenticated with the account's shared key.
 
