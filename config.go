@@ -3,6 +3,7 @@ package storage
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"strconv"
 	"strings"
@@ -149,23 +150,50 @@ func (c *Config) applyEnv() error {
 }
 
 // applyOptionsEnv sets each provider option an Env.Options_<KEY> variable
-// names, under the lower-cased key, over the configured value. An empty
-// value is ignored, as every other override's is.
+// names, under the lower-cased key, over the configured value. KEY is
+// upper-case letters, digits, and underscores, so each option has one
+// variable; a name in any other form is ignored, as is an empty value. The
+// map is copied before the first write, so an override never reaches a
+// map the caller shares. The value is the provider's to parse: a malformed
+// one fails when the provider is constructed, not here.
 func (c *Config) applyOptionsEnv() {
 	if c.Env.Options == "" {
 		return
 	}
 	prefix := c.Env.Options + "_"
+	copied := false
 	for _, kv := range os.Environ() {
 		name, v, ok := strings.Cut(kv, "=")
-		if !ok || v == "" || !strings.HasPrefix(name, prefix) || len(name) == len(prefix) {
+		if !ok || v == "" || !strings.HasPrefix(name, prefix) {
 			continue
 		}
-		if c.Options == nil {
-			c.Options = map[string]string{}
+		key := strings.TrimPrefix(name, prefix)
+		if !optionKey(key) {
+			continue
 		}
-		c.Options[strings.ToLower(strings.TrimPrefix(name, prefix))] = v
+		if !copied {
+			c.Options = maps.Clone(c.Options)
+			if c.Options == nil {
+				c.Options = map[string]string{}
+			}
+			copied = true
+		}
+		c.Options[strings.ToLower(key)] = v
 	}
+}
+
+// optionKey reports whether key is the upper-case form an option variable
+// names: non-empty, of A–Z, 0–9, and underscores.
+func optionKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for _, r := range key {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // finalized reports whether Finalize ran. RequestTimeout is the one pointer

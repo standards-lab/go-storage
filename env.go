@@ -8,7 +8,8 @@ import "github.com/standards-lab/go-core/config"
 // APP_STORAGE_LIST_PAGE_SIZE, and APP_STORAGE_REQUEST_TIMEOUT. Options is a
 // prefix rather than a name: each variable APP_STORAGE_OPTIONS_<KEY> sets
 // the provider option <key>, lower-cased, so APP_STORAGE_OPTIONS_MAX_RETRIES
-// sets max_retries. An empty name disables that one override. Finalize
+// sets max_retries; KEY is upper-case, and the provider parses the value
+// when it is constructed. An empty name disables that one override. Finalize
 // populates Env and exposes it for introspection.
 type Env struct {
 	Endpoint       string

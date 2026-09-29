@@ -188,6 +188,7 @@ func TestConfig_FinalizeOptionsEnv(t *testing.T) {
 	t.Setenv("TEST_STORAGE_OPTIONS_CONCURRENCY", "2")
 	t.Setenv("TEST_STORAGE_OPTIONS_TRY_TIMEOUT", "")
 	t.Setenv("TEST_STORAGE_OPTIONS_", "ignored")
+	t.Setenv("TEST_STORAGE_OPTIONS_Block_Size", "ignored")
 
 	if err := cfg.Finalize("test"); err != nil {
 		t.Fatalf("Finalize: %v", err)
@@ -195,6 +196,17 @@ func TestConfig_FinalizeOptionsEnv(t *testing.T) {
 	want := map[string]string{"max_retries": "1", "block_size": "1048576", "concurrency": "2"}
 	if !maps.Equal(cfg.Options, want) {
 		t.Errorf("Options = %v, want %v", cfg.Options, want)
+	}
+
+	// A map the caller shares keeps its values.
+	shared := map[string]string{"max_retries": "4"}
+	tmpl := validConfig()
+	tmpl.Options = shared
+	if err := tmpl.Finalize("test"); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if shared["max_retries"] != "4" || tmpl.Options["max_retries"] != "1" {
+		t.Errorf("shared = %v, config = %v; want the override on the config alone", shared, tmpl.Options)
 	}
 
 	bare := validConfig()
