@@ -7,6 +7,13 @@ only; each provider sub-module keeps its own.
 
 ## [Unreleased]
 
+### Added
+
+- `Config.ReadIdleTimeout` (`read_idle_timeout`, overridden by `<PREFIX>_STORAGE_READ_IDLE_TIMEOUT`)
+  bounds each read of a `Get`'s body, 30 seconds by default. A read that returns nothing within it
+  cancels the `Get`'s request and fails with `ErrUnavailable`. The clock runs only while a read is
+  in progress, so a caller may read at its own pace.
+
 ## [v0.3.0] - 2026-09-30
 
 ### Added

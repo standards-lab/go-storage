@@ -114,6 +114,9 @@ func TestConfig_FinalizeDefaults(t *testing.T) {
 	if cfg.RequestTimeout == nil || cfg.RequestTimeout.Duration() != 10*time.Second {
 		t.Errorf("RequestTimeout = %v, want 10s", cfg.RequestTimeout)
 	}
+	if cfg.ReadIdleTimeout == nil || cfg.ReadIdleTimeout.Duration() != 30*time.Second {
+		t.Errorf("ReadIdleTimeout = %v, want 30s", cfg.ReadIdleTimeout)
+	}
 	// The size limits are application policy and keep no base default.
 	if cfg.MaxObjectSize != 0 {
 		t.Errorf("MaxObjectSize = %d, want 0", cfg.MaxObjectSize)
@@ -162,6 +165,7 @@ func TestConfig_FinalizeEnvOverrides(t *testing.T) {
 	t.Setenv("TEST_STORAGE_MAX_OBJECT_SIZE", "5368709120")
 	t.Setenv("TEST_STORAGE_LIST_PAGE_SIZE", "500")
 	t.Setenv("TEST_STORAGE_REQUEST_TIMEOUT", "3s")
+	t.Setenv("TEST_STORAGE_READ_IDLE_TIMEOUT", "7s")
 
 	if err := cfg.Finalize("test"); err != nil {
 		t.Fatalf("Finalize: %v", err)
@@ -189,6 +193,9 @@ func TestConfig_FinalizeEnvOverrides(t *testing.T) {
 	}
 	if cfg.RequestTimeout.Duration() != 3*time.Second {
 		t.Errorf("RequestTimeout = %s, want 3s", cfg.RequestTimeout)
+	}
+	if cfg.ReadIdleTimeout.Duration() != 7*time.Second {
+		t.Errorf("ReadIdleTimeout = %s, want 7s", cfg.ReadIdleTimeout)
 	}
 }
 
@@ -241,6 +248,7 @@ func TestConfig_FinalizeMalformedEnvFails(t *testing.T) {
 		{"max object size", "TEST_STORAGE_MAX_OBJECT_SIZE", "huge"},
 		{"list page size", "TEST_STORAGE_LIST_PAGE_SIZE", "many"},
 		{"request timeout", "TEST_STORAGE_REQUEST_TIMEOUT", "soon"},
+		{"read idle timeout", "TEST_STORAGE_READ_IDLE_TIMEOUT", "soon"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -313,6 +321,13 @@ func TestConfig_Validate(t *testing.T) {
 				c.RequestTimeout = new(config.Duration(-time.Second))
 			},
 			"storage: request_timeout must be positive, got -1s",
+		},
+		{
+			"zero read idle timeout",
+			func(c *storage.Config) {
+				c.ReadIdleTimeout = new(config.Duration(0))
+			},
+			"storage: read_idle_timeout must be positive, got 0s",
 		},
 	}
 	for _, tc := range cases {

@@ -23,6 +23,7 @@ func TestNewEnv(t *testing.T) {
 		{"MaxObjectSize", env.MaxObjectSize, "APP_STORAGE_MAX_OBJECT_SIZE"},
 		{"ListPageSize", env.ListPageSize, "APP_STORAGE_LIST_PAGE_SIZE"},
 		{"RequestTimeout", env.RequestTimeout, "APP_STORAGE_REQUEST_TIMEOUT"},
+		{"ReadIdleTimeout", env.ReadIdleTimeout, "APP_STORAGE_READ_IDLE_TIMEOUT"},
 		{"Options", env.Options, "APP_STORAGE_OPTIONS"},
 	}
 	for _, tc := range cases {

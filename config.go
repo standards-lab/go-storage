@@ -15,6 +15,9 @@ import (
 // defaultRequestTimeout is RequestTimeout's default.
 const defaultRequestTimeout = 10 * time.Second
 
+// defaultReadIdleTimeout is ReadIdleTimeout's default.
+const defaultReadIdleTimeout = 30 * time.Second
+
 // Config holds the identity, credential, and limits of one object storage
 // container. Env records the override names Finalize composed and is
 // excluded from JSON.
@@ -53,6 +56,14 @@ type Config struct {
 	// from the caller's context and the provider's transport.
 	RequestTimeout *config.Duration `json:"request_timeout"`
 
+	// ReadIdleTimeout bounds each read of a Get's body: a read that
+	// returns nothing within it fails with [ErrUnavailable], and the read's
+	// request is cancelled, so a stalled store is cut off. The clock runs
+	// only while a read is in progress, so a caller that reads slowly, such
+	// as a download to a slow client, is never cut off, however long the
+	// whole transfer takes. It defaults to 30 seconds.
+	ReadIdleTimeout *config.Duration `json:"read_idle_timeout"`
+
 	Env Env `json:"-"`
 
 	// finalized records that the last Finalize succeeded; Config is copied
@@ -87,6 +98,9 @@ func (c *Config) Merge(src *Config) {
 	if src.RequestTimeout != nil {
 		c.RequestTimeout = src.RequestTimeout
 	}
+	if src.ReadIdleTimeout != nil {
+		c.ReadIdleTimeout = src.ReadIdleTimeout
+	}
 
 	if len(src.Options) > 0 {
 		c.Options = maps.Clone(c.Options)
@@ -119,6 +133,9 @@ func (c *Config) applyDefaults() {
 	if c.RequestTimeout == nil {
 		c.RequestTimeout = new(config.Duration(defaultRequestTimeout))
 	}
+	if c.ReadIdleTimeout == nil {
+		c.ReadIdleTimeout = new(config.Duration(defaultReadIdleTimeout))
+	}
 }
 
 func (c *Config) applyEnv() error {
@@ -149,7 +166,10 @@ func (c *Config) applyEnv() error {
 		c.ListPageSize = n
 	}
 	c.applyOptionsEnv()
-	return config.SetDurationFromEnv(&c.RequestTimeout, c.Env.RequestTimeout)
+	if err := config.SetDurationFromEnv(&c.RequestTimeout, c.Env.RequestTimeout); err != nil {
+		return err
+	}
+	return config.SetDurationFromEnv(&c.ReadIdleTimeout, c.Env.ReadIdleTimeout)
 }
 
 // applyOptionsEnv sets provider options from the variables under the
@@ -217,6 +237,9 @@ func (c *Config) validate() error {
 	}
 	if *c.RequestTimeout <= 0 {
 		return fmt.Errorf("storage: request_timeout must be positive, got %s", c.RequestTimeout)
+	}
+	if *c.ReadIdleTimeout <= 0 {
+		return fmt.Errorf("storage: read_idle_timeout must be positive, got %s", c.ReadIdleTimeout)
 	}
 	return nil
 }

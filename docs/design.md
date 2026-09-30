@@ -73,7 +73,11 @@ the account's shared key, which keeps `azidentity` and MSAL out of `azureblob` u
 needs managed identity. `MaxObjectSize` and `ListPageSize` have no default because a library ships
 no policy numbers; 0 means unset, and pointer fields were rejected because an explicit zero means
 nothing different. `RequestTimeout` has a default because it bounds only the calls `Store` makes
-for itself; one timeout over every operation would cut off a large upload. A per-request deadline
+for itself; one timeout over every operation would cut off a large upload. `ReadIdleTimeout` has a
+default because it bounds only the store's side of a download: `Store` times each read of a
+`Get`'s body while the read is in progress, cancels the request when the read waits past the
+limit, and reports `ErrUnavailable`. A caller that reads slowly spends its time between reads,
+which the clock never counts, so a slow client's download is never cut off, however long it runs. A per-request deadline
 on the object operations belongs to the provider's transport instead: `azureblob`'s
 `try_timeout` is that deadline, so a stalled store cannot hold a request indefinitely. It bounds
 each try of a `Put` or a metadata call, not the whole call with its retries. A `Get` is
