@@ -84,7 +84,10 @@
 // seconds, and it bounds only the calls Store makes on its own behalf in
 // Start and Ready. Finalize composes the override names from the prefix it
 // receives (through [NewEnv], recorded on [Env] for introspection), and an
-// empty prefix disables the overrides.
+// empty prefix disables the overrides. Provider options take overrides too,
+// one variable per key under the options prefix, so a deployment can tune a
+// provider without a configuration file. With the prefix "app",
+// APP_STORAGE_OPTIONS_MAX_RETRIES sets the option max_retries.
 //
 // # Writing objects
 //

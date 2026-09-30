@@ -5,8 +5,12 @@ import "github.com/standards-lab/go-core/config"
 // Env names the environment variables [Config.Finalize] reads. With the
 // prefix "app", the names are APP_STORAGE_ENDPOINT, APP_STORAGE_CONTAINER,
 // APP_STORAGE_ACCOUNT, APP_STORAGE_KEY, APP_STORAGE_MAX_OBJECT_SIZE,
-// APP_STORAGE_LIST_PAGE_SIZE, and APP_STORAGE_REQUEST_TIMEOUT. Options has no
-// environment override. An empty name disables that one override. Finalize
+// APP_STORAGE_LIST_PAGE_SIZE, and APP_STORAGE_REQUEST_TIMEOUT. Options is a
+// prefix rather than a full name: each variable APP_STORAGE_OPTIONS_<KEY>
+// sets the provider option named by the lower-cased KEY, so
+// APP_STORAGE_OPTIONS_MAX_RETRIES sets max_retries. KEY consists of
+// upper-case letters, digits, and underscores. The provider parses the value
+// when it is constructed. An empty name disables that one override. Finalize
 // populates Env and exposes it for introspection.
 type Env struct {
 	Endpoint       string
@@ -16,6 +20,7 @@ type Env struct {
 	MaxObjectSize  string
 	ListPageSize   string
 	RequestTimeout string
+	Options        string
 }
 
 // NewEnv composes the override names from prefix under the "storage" segment
@@ -33,5 +38,6 @@ func NewEnv(prefix string) Env {
 		MaxObjectSize:  config.EnvName(prefix, "storage", "max", "object", "size"),
 		ListPageSize:   config.EnvName(prefix, "storage", "list", "page", "size"),
 		RequestTimeout: config.EnvName(prefix, "storage", "request", "timeout"),
+		Options:        config.EnvName(prefix, "storage", "options"),
 	}
 }

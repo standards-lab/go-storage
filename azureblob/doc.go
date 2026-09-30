@@ -37,7 +37,9 @@
 // # Options
 //
 // Config.Options carries the provider's own settings. Every key this package
-// reads is listed here; any other key is ignored.
+// reads is listed here; any other key is ignored. Each key also takes an
+// environment override under the options prefix in storage.Env:
+// APP_STORAGE_OPTIONS_MAX_RETRIES, for example, sets max_retries.
 //
 //   - max_retries: the number of times the SDK retries a request that failed
 //     with a transport error or a retryable status (408, 429, 500, 502, 503,

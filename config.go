@@ -3,8 +3,10 @@ package storage
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/standards-lab/go-core/config"
@@ -41,6 +43,8 @@ type Config struct {
 	Key string `json:"key"`
 
 	// Options carries provider-specific settings that the provider reads.
+	// Each option takes an environment override: the variable
+	// Env.Options_<KEY>, where KEY is the option's key in upper case.
 	Options map[string]string `json:"options"`
 
 	// MaxObjectSize is the largest body [Store] accepts in a Put, in bytes.
@@ -141,7 +145,56 @@ func (c *Config) applyEnv() error {
 		}
 		c.ListPageSize = n
 	}
+	c.applyOptionsEnv()
 	return config.SetDurationFromEnv(&c.RequestTimeout, c.Env.RequestTimeout)
+}
+
+// applyOptionsEnv sets provider options from the environment. Each variable
+// named Env.Options_<KEY> sets the option whose key is the lower-cased KEY,
+// replacing the configured value. KEY must consist of upper-case letters,
+// digits, and underscores, so each option has exactly one variable;
+// applyOptionsEnv ignores a name in any other form and an empty value. It
+// copies the map before the first write, so an override never reaches a map
+// the caller shares. The provider parses the value, so a malformed value
+// fails when the provider is constructed, not here.
+func (c *Config) applyOptionsEnv() {
+	if c.Env.Options == "" {
+		return
+	}
+	prefix := c.Env.Options + "_"
+	copied := false
+	for _, kv := range os.Environ() {
+		name, v, ok := strings.Cut(kv, "=")
+		if !ok || v == "" || !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		key := strings.TrimPrefix(name, prefix)
+		if !optionKey(key) {
+			continue
+		}
+		if !copied {
+			c.Options = maps.Clone(c.Options)
+			if c.Options == nil {
+				c.Options = map[string]string{}
+			}
+			copied = true
+		}
+		c.Options[strings.ToLower(key)] = v
+	}
+}
+
+// optionKey reports whether key is a valid option-variable suffix: non-empty
+// and made only of A–Z, 0–9, and underscores.
+func optionKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for _, r := range key {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // finalized reports whether Finalize ran. RequestTimeout is the one pointer
