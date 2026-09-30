@@ -578,18 +578,83 @@ func TestStore_ShutdownDuringStartProbe(t *testing.T) {
 	wantNotReady(t, s, f.Fake)
 }
 
+func TestStore_ShutdownDuringStartProbeThatFails(t *testing.T) {
+	// A closed transport fails the probe that Shutdown outlived.
+	closed := errors.New("transport closed")
+	f := &blockingProbeClient{Fake: storagetest.NewFake(), entered: make(chan struct{}), release: make(chan struct{}), err: closed}
+	s := storage.New(f, finalizedConfig(t, 0, 0))
+
+	started := make(chan error, 1)
+	go func() { started <- s.Start(context.Background()) }()
+	<-f.entered
+	if err := s.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	close(f.release)
+
+	err := <-started
+	if !errors.Is(err, storage.ErrNotReady) {
+		t.Errorf("Start whose probe failed after a Shutdown = %v, want ErrNotReady", err)
+	}
+	if errors.Is(err, storage.ErrUnavailable) {
+		t.Errorf("Start whose probe failed after a Shutdown = %v, want it not to match ErrUnavailable", err)
+	}
+	wantNotReady(t, s, f.Fake)
+}
+
+func TestStore_ShutdownDuringStartEnsure(t *testing.T) {
+	f := &blockingEnsureClient{Fake: storagetest.NewFake(), entered: make(chan struct{}), release: make(chan struct{})}
+	s := storage.New(f, finalizedConfig(t, 0, 0))
+
+	started := make(chan error, 1)
+	go func() { started <- s.Start(context.Background()) }()
+	<-f.entered
+	if err := s.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	close(f.release)
+
+	if err := <-started; !errors.Is(err, storage.ErrNotReady) {
+		t.Errorf("Start whose container check outlived a Shutdown = %v, want ErrNotReady", err)
+	}
+	if got := f.Probes(); got != 0 {
+		t.Errorf("probes = %d, want 0: Start probed a client Shutdown had closed", got)
+	}
+	wantNotReady(t, s, f.Fake)
+}
+
 // blockingProbeClient is a fake whose Probe signals entered and then waits
-// for release, so a test can act while Start is probing.
+// for release, so a test can act while Start is probing. A non-nil err is
+// what the probe then returns in place of the fake's result.
 type blockingProbeClient struct {
 	*storagetest.Fake
 	entered chan struct{}
 	release chan struct{}
+	err     error
 }
 
 func (c *blockingProbeClient) Probe(ctx context.Context) error {
 	close(c.entered)
 	<-c.release
+	if c.err != nil {
+		return c.err
+	}
 	return c.Fake.Probe(ctx)
+}
+
+// blockingEnsureClient is a fake whose EnsureContainer signals entered and
+// then waits for release, so a test can act while Start checks the
+// container.
+type blockingEnsureClient struct {
+	*storagetest.Fake
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingEnsureClient) EnsureContainer(ctx context.Context) error {
+	close(c.entered)
+	<-c.release
+	return c.Fake.EnsureContainer(ctx)
 }
 
 func TestStore_StartReturnsCallerCancellation(t *testing.T) {
@@ -608,6 +673,36 @@ func TestStore_StartReturnsCallerCancellation(t *testing.T) {
 	if s.Ready() {
 		t.Error("Ready() = true after a cancelled Start, want false")
 	}
+}
+
+func TestStore_StartCallerDeadlineOutranksProviderClassification(t *testing.T) {
+	// The provider reports the caller's expired deadline as an outage of its
+	// own, an error that does not match context.DeadlineExceeded.
+	f := &failingEnsureClient{Fake: storagetest.NewFake(), err: fmt.Errorf("%w: request timed out", storage.ErrUnavailable)}
+	s := storage.New(f, finalizedConfig(t, 0, 0))
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	err := s.Start(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Start past the caller's deadline = %v, want context.DeadlineExceeded", err)
+	}
+	if errors.Is(err, storage.ErrUnavailable) {
+		t.Errorf("Start past the caller's deadline = %v, want it not to match ErrUnavailable", err)
+	}
+	if !strings.Contains(err.Error(), "request timed out") {
+		t.Errorf("error %q drops the provider's text", err)
+	}
+}
+
+// failingEnsureClient is a fake whose EnsureContainer returns err.
+type failingEnsureClient struct {
+	*storagetest.Fake
+	err error
+}
+
+func (c *failingEnsureClient) EnsureContainer(context.Context) error {
+	return c.err
 }
 
 // ctxEnsureClient is a fake whose EnsureContainer fails with its context's
@@ -1184,6 +1279,20 @@ func TestStore_PutValidatesKey(t *testing.T) {
 		t.Errorf("puts = %d, want 0: a rejected key never reaches the provider", got)
 	}
 	putString(t, s, "rel", "v")
+}
+
+func TestStore_PutNilValidateKeyAcceptsEveryKey(t *testing.T) {
+	f := storagetest.NewFake(storagetest.WithCapabilities(storage.Capabilities{MaxKeyLength: 1024}))
+	s := startedStore(t, f, 0, 0)
+
+	for _, key := range []string{"", "/abs", "a//b", strings.Repeat("k", 2048)} {
+		if _, err := s.Put(context.Background(), key, strings.NewReader("v"), storage.PutOptions{}); err != nil {
+			t.Errorf("Put(%q) with a nil ValidateKey = %v, want nil", key, err)
+		}
+	}
+	if got := f.Puts(); got != 4 {
+		t.Errorf("puts = %d, want 4: a nil ValidateKey passes every key to the provider", got)
+	}
 }
 
 func TestStore_ListLimit(t *testing.T) {

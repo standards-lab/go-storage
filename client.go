@@ -84,7 +84,8 @@ type Capabilities struct {
 	MaxKeyLength int
 
 	// ValidateKey reports whether the provider accepts key, returning a
-	// non-nil error that says why when it does not.
+	// non-nil error that says why when it does not. A nil ValidateKey
+	// accepts every key.
 	ValidateKey func(key string) error
 }
 

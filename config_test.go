@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"encoding/json"
 	"maps"
 	"os"
 	"path/filepath"
@@ -396,5 +397,35 @@ func TestConfig_Finalized(t *testing.T) {
 	}
 	if !cfg.Finalized() {
 		t.Error("Finalized() = false after Finalize, want true")
+	}
+	if cp := cfg; !cp.Finalized() {
+		t.Error("Finalized() = false on a copy of a finalized Config, want true")
+	}
+}
+
+func TestConfig_FinalizedNeedsFinalize(t *testing.T) {
+	var decoded storage.Config
+	if err := json.Unmarshal([]byte(`{"container":"assets","request_timeout":"5s"}`), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if decoded.RequestTimeout == nil {
+		t.Fatal("decode left request_timeout unset")
+	}
+	if decoded.Finalized() {
+		t.Error("Finalized() = true on a decoded Config never finalized, want false")
+	}
+}
+
+func TestConfig_FinalizedFalseAfterFailedFinalize(t *testing.T) {
+	cfg := validConfig()
+	if err := cfg.Finalize(""); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	cfg.ListPageSize = -1
+	if err := cfg.Finalize(""); err == nil {
+		t.Fatal("Finalize accepted a negative list_page_size")
+	}
+	if cfg.Finalized() {
+		t.Error("Finalized() = true after a Finalize that failed validation, want false")
 	}
 }

@@ -41,8 +41,11 @@
 //   - try_timeout: the deadline on each try of a request, as a positive Go
 //     duration such as "30s", so a stalled service cannot hold a call
 //     indefinitely. Unset means no deadline, the SDK default. It covers the
-//     reading of a Get's body and the upload of each Put block, so it must
-//     exceed the longest of those.
+//     upload of each Put block and a Get's whole body: the caller must read
+//     and close the body within try_timeout of the request, at its own pace,
+//     and a read past the deadline fails with an unclassified
+//     context.DeadlineExceeded from the body. It must exceed the longest
+//     block upload and the longest a caller takes over a body.
 //   - block_size: the size in bytes of each block a Put stages when the body
 //     is longer than one block, from 1,048,576 (1 MiB) to 104,857,600
 //     (100 MiB). Unset means 4 MiB.
@@ -57,8 +60,9 @@
 //
 // A Put without a ContentType resets a replaced blob's type to
 // application/octet-stream, so a caller that wants the type kept across a
-// replace passes it on every Put. [Client.List] returns the service's NextMarker as Page.Next verbatim:
-// Azure's is an opaque token and Azurite's the page's last key. The service
+// replace passes it on every Put. [Client.List] returns the service's
+// NextMarker as Page.Next verbatim: Azure's is an opaque token and Azurite's
+// the page's last key. The service
 // quotes an ETag in response headers and leaves it unquoted in a listing's
 // XML; the client adds the quotes, so List and Stat report the same string.
 //
@@ -88,7 +92,8 @@
 // against a real service when AZUREBLOB_TEST_ENDPOINT names its URL, each in
 // a container of its own, with the published development account and key:
 //
-//	docker run --rm -p 10000:10000 mcr.microsoft.com/azure-storage/azurite \
+//	docker run --rm -p 10000:10000 \
+//		mcr.microsoft.com/azure-storage/azurite:3.37.0 \
 //		azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck --loose
 //	AZUREBLOB_TEST_ENDPOINT=http://127.0.0.1:10000/devstoreaccount1 go test ./...
 package azureblob

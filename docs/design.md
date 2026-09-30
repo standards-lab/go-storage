@@ -74,9 +74,12 @@ needs managed identity. `MaxObjectSize` and `ListPageSize` have no default becau
 no policy numbers; 0 means unset, and pointer fields were rejected because an explicit zero means
 nothing different. `RequestTimeout` has a default because it bounds only the calls `Store` makes
 for itself; one timeout over every operation would cut off a large upload. A per-request deadline
-on the object operations belongs to the provider's transport instead, where it bounds each try
-rather than the whole call: `azureblob`'s `try_timeout` is that deadline, so a stalled store
-cannot hold a request indefinitely.
+on the object operations belongs to the provider's transport instead: `azureblob`'s
+`try_timeout` is that deadline, so a stalled store cannot hold a request indefinitely. It bounds
+each try of a `Put` or a metadata call rather than the whole call, retries included. A `Get` is
+one try whose deadline runs until its body is read, so the caller must read and close the body
+within `try_timeout` of the request, at its own pace; past the deadline the body's `Read` fails
+with an unclassified `context.DeadlineExceeded`.
 
 `azureblob`'s upload defaults trade memory for requests. A 4 MiB block is four times the SDK's
 1 MiB floor, so a multi-block body takes a quarter of the requests while the service's

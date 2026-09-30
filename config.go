@@ -54,6 +54,10 @@ type Config struct {
 	RequestTimeout *config.Duration `json:"request_timeout"`
 
 	Env Env `json:"-"`
+
+	// finalized records that the last Finalize succeeded; Config is copied
+	// by value, so a finalized copy stays finalized.
+	finalized bool
 }
 
 // Merge overlays src's set fields onto the receiver. Options merges key-wise
@@ -98,12 +102,17 @@ func (c *Config) Merge(src *Config) {
 // validates. Container is the one required field; a malformed override fails
 // with an error naming its variable.
 func (c *Config) Finalize(envPrefix string) error {
+	c.finalized = false
 	c.Env = NewEnv(envPrefix)
 	c.applyDefaults()
 	if err := c.applyEnv(); err != nil {
 		return err
 	}
-	return c.validate()
+	if err := c.validate(); err != nil {
+		return err
+	}
+	c.finalized = true
+	return nil
 }
 
 func (c *Config) applyDefaults() {
@@ -187,12 +196,11 @@ func optionKey(key string) bool {
 	return true
 }
 
-// Finalized reports whether Finalize has run on c. [New] and a provider's
-// constructor check it to catch a wiring defect.
+// Finalized reports whether the last Finalize on c, or on the Config c was
+// copied from, succeeded. [New] and a provider's constructor check it to
+// catch a wiring defect.
 func (c *Config) Finalized() bool {
-	// RequestTimeout is the one pointer Finalize defaults, so its presence is
-	// the evidence.
-	return c.RequestTimeout != nil
+	return c.finalized
 }
 
 // validate checks the finalized values. Every error has the form

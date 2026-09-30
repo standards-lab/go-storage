@@ -11,8 +11,8 @@ import (
 )
 
 // Store wraps a provider's [Client] with the lifecycle and the limits from
-// [Config]; every object operation returns [ErrNotReady] outside a successful
-// Start and Shutdown. A Store is safe for concurrent use.
+// [Config]; every object operation, and Probe, returns [ErrNotReady] before a
+// successful Start or after Shutdown. A Store is safe for concurrent use.
 type Store struct {
 	client         Client
 	container      string
@@ -48,9 +48,11 @@ func New(c Client, cfg Config) *Store {
 // Start ensures the configured container exists, then probes the provider,
 // both under one context bounded by RequestTimeout, and marks the store
 // started. A failure matches [ErrUnavailable] with the provider's error kept,
-// except that the caller's own cancellation is returned as it is. Start after
-// Shutdown, one that lands during Start's probe included, returns
-// [ErrNotReady].
+// except that a failure once the caller's ctx is done matches ctx.Err() and
+// not ErrUnavailable. Start after Shutdown returns [ErrNotReady], and so does
+// a Start that Shutdown lands during: Start probes no client closed while it
+// ensured the container, and a step that fails once Shutdown has run reports
+// ErrNotReady rather than the closed client's error.
 func (s *Store) Start(ctx context.Context) error {
 	if s.isShut() {
 		return ErrNotReady
@@ -58,10 +60,13 @@ func (s *Store) Start(ctx context.Context) error {
 	startCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
 	defer cancel()
 	if err := s.client.EnsureContainer(startCtx); err != nil {
-		return startFailure(ctx, err)
+		return s.startFailure(ctx, err)
+	}
+	if s.isShut() {
+		return ErrNotReady
 	}
 	if err := s.client.Probe(startCtx); err != nil {
-		return startFailure(ctx, err)
+		return s.startFailure(ctx, err)
 	}
 
 	s.mu.Lock()
@@ -79,11 +84,24 @@ func (s *Store) isShut() bool {
 	return s.shut
 }
 
-// startFailure classifies a Start failure under [ErrUnavailable]. The
-// caller's cancellation and an error the provider already classified pass
-// through unchanged.
-func startFailure(ctx context.Context, err error) error {
-	if ctx.Err() != nil || errors.Is(err, ErrUnavailable) {
+// startFailure classifies a Start failure. A Shutdown that has run makes it
+// [ErrNotReady]. Once the caller's ctx is done, the result matches ctx.Err()
+// and not ErrUnavailable: the provider's error passes through when it
+// already matches ctx.Err() alone, and is otherwise kept as text only.
+// Otherwise the failure matches ErrUnavailable, with an error the provider
+// already classified passing through unchanged.
+func (s *Store) startFailure(ctx context.Context, err error) error {
+	if s.isShut() {
+		return ErrNotReady
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		if errors.Is(err, ctxErr) && !errors.Is(err, ErrUnavailable) {
+			return err
+		}
+		// %v keeps the provider's text but not its classification.
+		return fmt.Errorf("%w: %v", ctxErr, err)
+	}
+	if errors.Is(err, ErrUnavailable) {
 		return err
 	}
 	return fmt.Errorf("%w: %w", ErrUnavailable, err)
@@ -228,7 +246,8 @@ func (s *Store) EnsureContainer(ctx context.Context) error {
 }
 
 // Probe reports whether the provider is reachable, under the caller's
-// context.
+// context. It returns [ErrNotReady] before a successful Start or after
+// Shutdown.
 func (s *Store) Probe(ctx context.Context) error {
 	if !s.started.Load() {
 		return ErrNotReady

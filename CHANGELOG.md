@@ -11,30 +11,35 @@ only; each provider sub-module keeps its own.
 
 ### Added
 
-- `Config.Finalized` reports whether `Finalize` has run, so a provider's constructor can detect an
-  unfinalized configuration without relying on the base module's private rule.
+- `Config.Finalized` reports whether the last `Finalize` succeeded, so a provider's constructor can
+  detect an unfinalized configuration. A copy of a finalized `Config` stays finalized; a decoded
+  `Config` that was never finalized, or one whose `Finalize` failed, is not.
 - `storagetest.Fake.SetDown` starts or ends the Fake's outage.
 
 ### Changed
 
 - **Breaking:** `Store.Shutdown` is terminal. `Start` after `Shutdown` returns `ErrNotReady` without
-  calling the provider, and a `Shutdown` that lands while `Start` is probing leaves the store not
-  started, with `Start` returning `ErrNotReady`.
+  calling the provider, and a `Shutdown` that lands while `Start` runs leaves the store not
+  started, with `Start` returning `ErrNotReady` even when the closed client then fails, and
+  without probing a client closed while `Start` ensured the container.
 - **Breaking:** `Store.Put` checks the key with the provider's `Capabilities().ValidateKey` before
-  the provider sees it, and returns that error, and it rejects a negative `PutOptions.Size`.
+  the provider sees it, and returns that error, and it rejects a negative `PutOptions.Size`. A nil
+  `ValidateKey` accepts every key.
 - **Breaking:** a `Put` without a `ContentType` stores and reports `application/octet-stream`.
   `storagetest.Fake` does, and the conformance suite checks the `ContentType` of every `Put`,
   `Get`, and `Stat` it makes.
 - **Breaking:** `storagetest.Fake`'s exported `Down` field is replaced by `SetDown`.
-- The conformance suite fails a missing key whose error also matches `ErrContainerNotFound` or
-  `ErrUnavailable`.
+- **Breaking:** the conformance suite fails a missing key whose error also matches
+  `ErrContainerNotFound` or `ErrUnavailable`, so a provider that passed v0.2.1's suite may fail
+  this one.
 - Every `Config` validation error has the form `storage: <field> <problem>`.
 - The package documentation states each contract fact once, beside the symbol it governs.
 
 ### Fixed
 
-- `Store.Start` returns the caller's own cancellation as it is instead of classifying it as
-  `ErrUnavailable`.
+- `Store.Start` reports a failure once the caller's context is done as that context's error, which
+  `errors.Is` matches, instead of classifying it as `ErrUnavailable`, even when the provider
+  classified it.
 - `Config.Merge` copies `Options` before writing, so an overlay never reaches a map the caller
   shares.
 - `storagetest.WithPageSize` with 0 or less keeps the default page size, where `Fake.List`

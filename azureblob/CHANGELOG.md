@@ -14,7 +14,9 @@ sub-module only; the base module keeps its own.
 
 - The `try_timeout` option sets a deadline on each try of a request, as a Go duration, through
   the SDK's `RetryOptions.TryTimeout`, so a stalled service cannot hold a call indefinitely. It
-  covers the reading of a `Get` body and the upload of each `Put` block. Unset keeps the SDK
+  covers the upload of each `Put` block and a `Get`'s whole body: the caller must read and close
+  the body within `try_timeout` of the request, at its own pace, and a read past the deadline
+  fails with an unclassified `context.DeadlineExceeded` from the body. Unset keeps the SDK
   default, no deadline.
 
 ### Changed
