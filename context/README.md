@@ -23,8 +23,6 @@ unbuilt is added when it is about to be built.
 
 ## Known limits of the adapter
 
-- `Get` returns the SDK's raw response body, not its retrying reader, so a connection that drops
-  mid-body fails the read and nothing retries it.
 - `Delete` sends no snapshot option, so a blob that has snapshots fails with a 409. Nothing in
   this repository creates a snapshot.
 
