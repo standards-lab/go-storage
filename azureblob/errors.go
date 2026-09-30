@@ -42,3 +42,14 @@ func classify(err error) error {
 	}
 	return err
 }
+
+// classifyRead classifies a Get body's read failure: a blob replaced
+// before a resumption fails its ETag condition, which is
+// storage.ErrNotFound, since the version being read no longer exists;
+// everything else is classify's.
+func classifyRead(err error) error {
+	if bloberror.HasCode(err, bloberror.ConditionNotMet) {
+		return fmt.Errorf("%w: the blob changed during the read: %w", storage.ErrNotFound, err)
+	}
+	return classify(err)
+}

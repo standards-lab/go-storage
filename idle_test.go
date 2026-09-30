@@ -120,3 +120,46 @@ func TestStore_GetCloseCancelsTheRequest(t *testing.T) {
 		t.Error("Close left the Get's request open")
 	}
 }
+
+// failingGetClient fails every Get with err, recording the context it was
+// handed.
+type failingGetClient struct {
+	*storagetest.Fake
+	err error
+	ctx context.Context
+}
+
+func (c *failingGetClient) Get(ctx context.Context, _ string, _ storage.GetOptions) (storage.Blob, error) {
+	c.ctx = ctx
+	return storage.Blob{}, c.err
+}
+
+// A Get the provider fails returns the provider's error and releases the
+// request it opened.
+func TestStore_GetFailureReleasesTheRequest(t *testing.T) {
+	c := &failingGetClient{Fake: storagetest.NewFake(), err: storage.ErrNotFound}
+	if _, err := idleStore(t, c).Get(context.Background(), "k", storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("Get = %v, want the provider's ErrNotFound", err)
+	}
+	if c.ctx.Err() == nil {
+		t.Error("the failed Get left its request open")
+	}
+}
+
+// A stalled read's error matches ErrUnavailable alone: the cancellation the
+// idle timer made is not the caller's context's.
+func TestStore_GetStallIsNotTheCallersCancellation(t *testing.T) {
+	c := &stallingClient{Fake: storagetest.NewFake()}
+	blob, err := idleStore(t, c).Get(context.Background(), "k", storage.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer func() { _ = blob.Body.Close() }()
+	_, err = io.ReadAll(blob.Body)
+	if !errors.Is(err, storage.ErrUnavailable) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("ReadAll = %v; want ErrUnavailable and no context error", err)
+	}
+	if !strings.Contains(err.Error(), "read idle timeout") {
+		t.Errorf("ReadAll = %v; want it to name the read idle timeout", err)
+	}
+}

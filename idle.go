@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -33,24 +34,32 @@ func newIdleReader(body io.ReadCloser, limit time.Duration, cancel context.Cance
 
 func (r *idleReader) Read(p []byte) (int, error) {
 	if r.fired.Load() {
-		return 0, r.stalled(context.Canceled)
+		return 0, r.stalled(context.DeadlineExceeded)
 	}
 	r.timer.Reset(r.limit)
 	n, err := r.body.Read(p)
-	r.timer.Stop()
-	if err != nil && err != io.EOF && r.fired.Load() {
-		return n, r.stalled(err)
+	if !r.timer.Stop() && r.fired.Load() {
+		// The timer fired as the read returned: the request is cancelled,
+		// so a read that did not finish the body is the stall's.
+		if err == io.EOF {
+			return n, err
+		}
+		return n, r.stalled(cmp.Or(err, context.DeadlineExceeded))
 	}
 	return n, err
 }
 
+// stalled is the error of a read the timer cut off. The cause is kept as
+// text only: it is the cancellation the timer made, which a caller must
+// not read as its own context's.
 func (r *idleReader) stalled(cause error) error {
-	return fmt.Errorf("%w: no bytes read within the read idle timeout (%s): %w", ErrUnavailable, r.limit, cause)
+	return fmt.Errorf("%w: no bytes read within the read idle timeout (%s): %v", ErrUnavailable, r.limit, cause)
 }
 
+// Close cancels the request before it closes the body, so a provider's
+// body that resumes after a failed read sees the request done and stops.
 func (r *idleReader) Close() error {
 	r.timer.Stop()
-	err := r.body.Close()
 	r.cancel()
-	return err
+	return r.body.Close()
 }

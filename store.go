@@ -203,10 +203,8 @@ func readFailure(recorded, provider error) error {
 }
 
 // Get opens the object at key for reading. The caller closes the returned
-// Blob's Body. Each read of the body is bounded by ReadIdleTimeout: a read
-// that returns nothing within it cancels the Get's request and fails with
-// [ErrUnavailable]. The bound times a read in progress, never the time
-// between reads, so a caller may read at its own pace.
+// Blob's Body, which also releases the request the provider was handed.
+// Each read of the body is bounded by Config.ReadIdleTimeout.
 func (s *Store) Get(ctx context.Context, key string, opts GetOptions) (Blob, error) {
 	if !s.started.Load() {
 		return Blob{}, ErrNotReady

@@ -47,10 +47,13 @@
 //     operation, never a whole transfer: the upload of each Put block, and
 //     the part of a Get's body read within the try. A Get's body whose try
 //     deadline passes mid-read resumes from its offset with a ranged request
-//     conditioned on the ETag, max_retries times per read, so a download
-//     outlasts try_timeout however slowly the caller reads; a body that
-//     stalls on every try fails the read with an unclassified
-//     context.DeadlineExceeded. It must exceed the longest block upload.
+//     conditioned on the ETag, up to max_retries resumptions per read, each
+//     itself retried by the policy, so a download outlasts try_timeout
+//     however slowly the caller reads; with max_retries 0 it does not
+//     resume. A body that stalls on every try fails the read with
+//     storage.ErrUnavailable. It must exceed the longest block upload, and
+//     stay below storage.Config.ReadIdleTimeout when a Store wraps the
+//     client, so a stalled try can resume before the store is cut off.
 //   - block_size: the size in bytes of each block a Put stages when the body
 //     is longer than one block, from 1,048,576 (1 MiB) to 104,857,600
 //     (100 MiB). Unset means 4 MiB.

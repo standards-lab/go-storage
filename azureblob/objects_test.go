@@ -2,7 +2,6 @@ package azureblob_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -465,7 +464,7 @@ func rangedBody(content string, stallAt int) http.HandlerFunc {
 // ranged GET conditioned on the ETag, so a transfer outlasts try_timeout.
 func TestGet_ResumesABodyPastTheTryTimeout(t *testing.T) {
 	svc := newService(t, rangedBody("helloworld", 5))
-	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "200ms"}))
+	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "200ms", "max_retries": "1"}))
 
 	blob, err := c.Get(t.Context(), "k", storage.GetOptions{})
 	if err != nil {
@@ -489,7 +488,7 @@ func TestGet_ResumesABodyPastTheTryTimeout(t *testing.T) {
 }
 
 // A body that stalls on every try fails its read once the retries are
-// spent, with the try timeout's context.DeadlineExceeded, unclassified.
+// spent, as storage.ErrUnavailable.
 func TestGet_AStalledBodyFailsOnceItsRetriesAreSpent(t *testing.T) {
 	svc := newService(t, rangedBody("helloworld", 5))
 	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "100ms", "max_retries": "1"}))
@@ -512,8 +511,8 @@ func TestGet_AStalledBodyFailsOnceItsRetriesAreSpent(t *testing.T) {
 	defer func() { _ = blob.Body.Close() }()
 	start := time.Now()
 	data, err := io.ReadAll(blob.Body)
-	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, storage.ErrUnavailable) {
-		t.Fatalf("ReadAll = %q, %v; want the unclassified context.DeadlineExceeded", data, err)
+	if !errors.Is(err, storage.ErrUnavailable) {
+		t.Fatalf("ReadAll = %q, %v; want ErrUnavailable", data, err)
 	}
 	if string(data) != "hello" {
 		t.Errorf("read %q before the failure, want hello", data)
@@ -523,6 +522,50 @@ func TestGet_AStalledBodyFailsOnceItsRetriesAreSpent(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("read took %v, want it cut off near two 100ms tries", elapsed)
+	}
+}
+
+// max_retries=0 means one try: a body whose try deadline passes is not
+// resumed.
+func TestGet_NoRetriesMeansNoResumption(t *testing.T) {
+	svc := newService(t, rangedBody("helloworld", 5))
+	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "100ms", "max_retries": "0"}))
+
+	blob, err := c.Get(t.Context(), "k", storage.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get = %v, want nil", err)
+	}
+	defer func() { _ = blob.Body.Close() }()
+	if _, err := io.ReadAll(blob.Body); !errors.Is(err, storage.ErrUnavailable) {
+		t.Fatalf("ReadAll = %v, want ErrUnavailable", err)
+	}
+	if n := len(svc.Requests()); n != 1 {
+		t.Errorf("service saw %d requests, want 1 with max_retries=0", n)
+	}
+}
+
+// A blob replaced before a resumption fails the resumed GET's ETag
+// condition, which the read reports as storage.ErrNotFound: the version
+// being read is gone.
+func TestGet_ABlobReplacedMidReadIsNotFound(t *testing.T) {
+	svc := newService(t, rangedBody("helloworld", 5))
+	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "100ms", "max_retries": "1"}))
+	first := svc.respond
+	svc.respond = func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-ms-range") != "" {
+			failWith(http.StatusPreconditionFailed, "ConditionNotMet")(w, r)
+			return
+		}
+		first(w, r)
+	}
+
+	blob, err := c.Get(t.Context(), "k", storage.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get = %v, want nil", err)
+	}
+	defer func() { _ = blob.Body.Close() }()
+	if _, err := io.ReadAll(blob.Body); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("ReadAll = %v, want ErrNotFound", err)
 	}
 }
 

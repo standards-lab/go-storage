@@ -14,6 +14,11 @@ only; each provider sub-module keeps its own.
   cancels the `Get`'s request and fails with `ErrUnavailable`. The clock runs only while a read is
   in progress, so a caller may read at its own pace.
 
+### Changed
+
+- `Store.Get` hands the provider a context of its own, which closing the body cancels, so a
+  provider sees its request released when the caller is done with the body.
+
 ## [v0.3.0] - 2026-09-30
 
 ### Added

@@ -61,7 +61,9 @@ type Config struct {
 	// request is cancelled, so a stalled store is cut off. The clock runs
 	// only while a read is in progress, so a caller that reads slowly, such
 	// as a download to a slow client, is never cut off, however long the
-	// whole transfer takes. It defaults to 30 seconds.
+	// whole transfer takes. It defaults to 30 seconds. A provider that
+	// retries within a read, as azureblob's try_timeout does, is sized
+	// below it.
 	ReadIdleTimeout *config.Duration `json:"read_idle_timeout"`
 
 	Env Env `json:"-"`

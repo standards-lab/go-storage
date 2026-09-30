@@ -115,7 +115,8 @@ func uploadOptions(options map[string]string) (blockSize int64, concurrency int,
 }
 
 // readRetries is the retry count the SDK's policy applies for the
-// configured MaxRetries: its default of 3 when unset (zero), and none when
+// configured MaxRetries, which a Get's body resumes as many times per
+// read: the policy's default of 3 when unset (zero), and none when
 // negative.
 func readRetries(maxRetries int32) int32 {
 	switch {

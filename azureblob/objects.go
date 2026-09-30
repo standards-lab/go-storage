@@ -53,8 +53,12 @@ func (c *Client) Put(ctx context.Context, key string, body io.Reader, opts stora
 	}, nil
 }
 
-// Get opens the blob at key with one Get Blob request and returns the
-// response body as the stream.
+// Get opens the blob at key with one Get Blob request and returns a body
+// that resumes after a failed read, as the package documentation's
+// try_timeout entry describes. A read's failure is classified as every
+// other operation's is: a try's deadline or a lost connection is
+// storage.ErrUnavailable, and a blob deleted or replaced before a
+// resumption is storage.ErrNotFound, since the version being read is gone.
 func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (storage.Blob, error) {
 	resp, err := c.container.NewBlobClient(key).DownloadStream(ctx, nil)
 	if err != nil {
@@ -73,12 +77,31 @@ func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (sto
 			ETag:        entityTag(resp.ETag),
 			ModifiedAt:  deref(resp.LastModified),
 		},
-		// A try's deadline covers the part of the body read within it: when
-		// a read fails, the body resumes from its offset with a ranged GET
-		// conditioned on the ETag, so a transfer outlasts try_timeout while
-		// a try that stalls is retried, readRetries times per read.
-		Body: resp.NewRetryReader(ctx, &blob.RetryReaderOptions{MaxRetries: c.readRetries}),
+		Body: classifiedBody{c.resuming(ctx, resp)},
 	}, nil
+}
+
+// resuming is the body of a Get: with readRetries above zero, the SDK's
+// retry reader, which resumes a failed read from its offset with a ranged
+// GET conditioned on the ETag; with none, the response body itself, since
+// the retry reader reads a count below 1 as its default of 3.
+func (c *Client) resuming(ctx context.Context, resp blob.DownloadStreamResponse) io.ReadCloser {
+	if c.readRetries == 0 {
+		return resp.Body
+	}
+	return resp.NewRetryReader(ctx, &blob.RetryReaderOptions{MaxRetries: c.readRetries})
+}
+
+// classifiedBody classifies a Get body's read failures as classify does
+// an operation's; io.EOF passes through.
+type classifiedBody struct{ io.ReadCloser }
+
+func (b classifiedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		err = classifyRead(err)
+	}
+	return n, err
 }
 
 // Stat reads the blob's properties with one Get Blob Properties request.

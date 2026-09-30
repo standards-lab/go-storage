@@ -117,7 +117,8 @@ func TestClientOptions_TryTimeout(t *testing.T) {
 }
 
 // A Get's body resumes as many times per read as the SDK's policy retries
-// each request.
+// each request; none means the body is not wrapped at all
+// (TestGet_NoRetriesMeansNoResumption).
 func TestReadRetries(t *testing.T) {
 	cases := []struct {
 		configured, want int32

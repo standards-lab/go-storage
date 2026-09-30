@@ -14,6 +14,11 @@ sub-module only; the base module keeps its own.
   passes mid-read resumes from its offset with a ranged request conditioned on the ETag, up to
   `max_retries` times per read, so a download outlasts `try_timeout` however slowly its caller
   reads. Before, the caller had to read the whole body within `try_timeout` of the request.
+  With `max_retries` 0 the body does not resume.
+- A `Get` body's read failure is classified: a try's deadline or a lost connection is
+  `storage.ErrUnavailable`, and a blob deleted or replaced before a resumption is
+  `storage.ErrNotFound`. Before, the deadline surfaced as an unclassified
+  `context.DeadlineExceeded`.
 
 ## [v0.3.0] - 2026-09-30
 
