@@ -19,6 +19,7 @@ type Store struct {
 	maxObjectSize  int64
 	listPageSize   int
 	requestTimeout time.Duration
+	readIdle       time.Duration
 
 	// started gates the object operations. mu serializes the transitions
 	// Start and Shutdown make, and shut records that Shutdown has run.
@@ -42,6 +43,7 @@ func New(c Client, cfg Config) *Store {
 		maxObjectSize:  cfg.MaxObjectSize,
 		listPageSize:   cfg.ListPageSize,
 		requestTimeout: cfg.RequestTimeout.Duration(),
+		readIdle:       cfg.ReadIdleTimeout.Duration(),
 	}
 }
 
@@ -201,12 +203,20 @@ func readFailure(recorded, provider error) error {
 }
 
 // Get opens the object at key for reading. The caller closes the returned
-// Blob's Body.
+// Blob's Body; closing it also releases the request the provider was
+// handed. Config.ReadIdleTimeout bounds each read of the body.
 func (s *Store) Get(ctx context.Context, key string, opts GetOptions) (Blob, error) {
 	if !s.started.Load() {
 		return Blob{}, ErrNotReady
 	}
-	return s.client.Get(ctx, key, opts)
+	ctx, cancel := context.WithCancel(ctx)
+	blob, err := s.client.Get(ctx, key, opts)
+	if err != nil {
+		cancel()
+		return Blob{}, err
+	}
+	blob.Body = newIdleReader(blob.Body, s.readIdle, cancel)
+	return blob, nil
 }
 
 // Stat returns the metadata of the object at key without reading its

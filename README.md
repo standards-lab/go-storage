@@ -20,8 +20,9 @@ the standard's principles it enhances are stated below. Its repository-level pri
 - The base module depends on the standard library and `go-core` alone. A provider's SDK lives in
   that provider's own sub-module, and the base module never imports it.
 - Limits are application policy. `MaxObjectSize` and `ListPageSize` have no default, and the
-  application supplies them; the one default, `RequestTimeout`, bounds only the calls `Store`
-  makes on its own behalf in `Start` and `Ready`.
+  application supplies them. The two defaults bound what no caller controls: `RequestTimeout`
+  bounds the calls `Store` makes on its own behalf in `Start` and `Ready`, and `ReadIdleTimeout`
+  bounds each read of a `Get`'s body, so a stalled store is cut off while a slow caller is not.
 - Storage gates readiness: `Store` registers with the process lifecycle through a `Start`, a
   `Shutdown`, and a `Ready` check that probes the provider live. `Start` ensures the configured
   container exists before it probes, so an empty store starts cleanly.

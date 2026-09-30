@@ -7,6 +7,20 @@ only; each provider sub-module keeps its own.
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-09-30
+
+### Added
+
+- `Config.ReadIdleTimeout` (`read_idle_timeout`, overridden by `<PREFIX>_STORAGE_READ_IDLE_TIMEOUT`)
+  bounds each read of a `Get`'s body, 30 seconds by default. A read that returns nothing within it
+  cancels the `Get`'s request and fails with `ErrUnavailable`. The clock runs only while a read is
+  in progress, so a caller may read at its own pace.
+
+### Changed
+
+- `Store.Get` hands the provider a context derived from the caller's, which closing the body
+  cancels, so the provider's request ends when the caller is done with the body.
+
 ## [v0.3.0] - 2026-09-30
 
 ### Added
@@ -125,7 +139,8 @@ only; each provider sub-module keeps its own.
   entity-tag form and equal across `Put`, `Get`, `Stat`, and `List`. `Fake` enforces `Size`
   and reports a quoted ETag.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.4.0...HEAD
+[v0.4.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.3.0
 [v0.2.1]: https://github.com/standards-lab/go-storage/releases/tag/v0.2.1
 [v0.2.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.2.0

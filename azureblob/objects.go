@@ -53,8 +53,13 @@ func (c *Client) Put(ctx context.Context, key string, body io.Reader, opts stora
 	}, nil
 }
 
-// Get opens the blob at key with one Get Blob request and returns the
-// response body as the stream.
+// Get opens the blob at key with one Get Blob request and returns a body
+// that resumes after a failed read, as the try_timeout entry in the
+// package documentation describes. The body classifies a read's failure
+// as every other operation's is classified: a try's deadline or a lost
+// connection is storage.ErrUnavailable, and a blob deleted or replaced
+// before a resumption is storage.ErrNotFound, since the version being
+// read is gone.
 func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (storage.Blob, error) {
 	resp, err := c.container.NewBlobClient(key).DownloadStream(ctx, nil)
 	if err != nil {
@@ -73,8 +78,32 @@ func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (sto
 			ETag:        entityTag(resp.ETag),
 			ModifiedAt:  deref(resp.LastModified),
 		},
-		Body: resp.Body,
+		Body: classifiedBody{c.resuming(ctx, resp)},
 	}, nil
+}
+
+// resuming returns the body of a Get. With readRetries above zero it is
+// the SDK's retry reader, which resumes a failed read from its offset with
+// a ranged GET conditioned on the ETag. With none it is the response body
+// itself, since the retry reader treats a count below 1 as its default
+// of 3.
+func (c *Client) resuming(ctx context.Context, resp blob.DownloadStreamResponse) io.ReadCloser {
+	if c.readRetries == 0 {
+		return resp.Body
+	}
+	return resp.NewRetryReader(ctx, &blob.RetryReaderOptions{MaxRetries: c.readRetries})
+}
+
+// classifiedBody classifies a Get body's read failures with classifyRead
+// and passes io.EOF through unchanged.
+type classifiedBody struct{ io.ReadCloser }
+
+func (b classifiedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		err = classifyRead(err)
+	}
+	return n, err
 }
 
 // Stat reads the blob's properties with one Get Blob Properties request.

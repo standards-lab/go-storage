@@ -8,6 +8,20 @@ sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-09-30
+
+### Changed
+
+- `try_timeout` bounds one operation, never a whole transfer. When a try's deadline passes
+  mid-read, a `Get`'s body resumes from its offset with a ranged request conditioned on the ETag,
+  up to `max_retries` times per read, so a download outlasts `try_timeout` however slowly its
+  caller reads. With `max_retries` 0 the body does not resume. Before, the caller had to read the
+  whole body within `try_timeout` of the request.
+- A `Get` body classifies its read failures: a try's deadline or a lost connection is
+  `storage.ErrUnavailable`, and a blob deleted or replaced before a resumption is
+  `storage.ErrNotFound`. Before, the deadline surfaced as an unclassified
+  `context.DeadlineExceeded`.
+
 ## [v0.3.0] - 2026-09-30
 
 ### Added
@@ -90,7 +104,8 @@ sub-module only; the base module keeps its own.
   against a real service, gated on `AZUREBLOB_TEST_ENDPOINT` so they skip on the unit tier.
 - Requires `github.com/standards-lab/go-storage` v0.1.0.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/azureblob/v0.3.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/azureblob/v0.4.0...HEAD
+[v0.4.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.1.0
