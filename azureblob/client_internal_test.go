@@ -2,6 +2,7 @@ package azureblob
 
 import (
 	"testing"
+	"time"
 
 	"github.com/standards-lab/go-storage"
 )
@@ -46,11 +47,11 @@ func TestUploadOptions(t *testing.T) {
 		wantBlockSize   int64
 		wantConcurrency int
 	}{
-		{"unset applies the defaults", nil, DefaultBlockSize, DefaultConcurrency},
-		{"block_size at the floor", map[string]string{"block_size": "1048576"}, 1 << 20, DefaultConcurrency},
-		{"block_size at the cap", map[string]string{"block_size": "104857600"}, 100 << 20, DefaultConcurrency},
-		{"concurrency at the floor", map[string]string{"concurrency": "1"}, DefaultBlockSize, 1},
-		{"concurrency at the cap", map[string]string{"concurrency": "32"}, DefaultBlockSize, 32},
+		{"unset applies the defaults", nil, defaultBlockSize, defaultConcurrency},
+		{"block_size at the floor", map[string]string{"block_size": "1048576"}, 1 << 20, defaultConcurrency},
+		{"block_size at the cap", map[string]string{"block_size": "104857600"}, 100 << 20, defaultConcurrency},
+		{"concurrency at the floor", map[string]string{"concurrency": "1"}, defaultBlockSize, 1},
+		{"concurrency at the cap", map[string]string{"concurrency": "32"}, defaultBlockSize, 32},
 		{"both set", map[string]string{"block_size": "8388608", "concurrency": "2"}, 8 << 20, 2},
 	}
 	for _, tc := range cases {
@@ -84,6 +85,32 @@ func TestClientOptions_MaxRetries(t *testing.T) {
 			}
 			if opts.Retry.MaxRetries != tc.want {
 				t.Errorf("MaxRetries = %d, want %d", opts.Retry.MaxRetries, tc.want)
+			}
+		})
+	}
+}
+
+func TestClientOptions_TryTimeout(t *testing.T) {
+	cases := []struct {
+		name    string
+		options map[string]string
+		want    time.Duration
+	}{
+		{"unset leaves the SDK default", nil, 0},
+		{"a duration passes through", map[string]string{"try_timeout": "250ms"}, 250 * time.Millisecond},
+		{"beside max_retries", map[string]string{"try_timeout": "30s", "max_retries": "2"}, 30 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts, err := clientOptions(tc.options)
+			if err != nil {
+				t.Fatalf("clientOptions: %v", err)
+			}
+			if opts.Retry.TryTimeout != tc.want {
+				t.Errorf("TryTimeout = %v, want %v", opts.Retry.TryTimeout, tc.want)
+			}
+			if _, ok := tc.options["max_retries"]; ok && opts.Retry.MaxRetries != 2 {
+				t.Errorf("MaxRetries = %d beside try_timeout, want 2", opts.Retry.MaxRetries)
 			}
 		})
 	}

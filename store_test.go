@@ -146,7 +146,7 @@ func TestNew_PanicsOnUnfinalizedConfig(t *testing.T) {
 
 func TestNew_PerformsNoIO(t *testing.T) {
 	f := storagetest.NewFake()
-	f.Down.Store(true)
+	f.SetDown(true)
 
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
@@ -258,7 +258,7 @@ func TestStore_StartCreatesMissingContainer(t *testing.T) {
 
 func TestStore_StartFailureWrapsSentinelAndCause(t *testing.T) {
 	f := storagetest.NewFake()
-	f.Down.Store(true)
+	f.SetDown(true)
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	err := s.Start(context.Background())
@@ -437,7 +437,7 @@ func TestStore_EnsureContainerReturnsProviderError(t *testing.T) {
 	}
 
 	down := storagetest.NewFake()
-	down.Down.Store(true)
+	down.SetDown(true)
 	err := storage.New(down, finalizedConfig(t, 0, 0)).EnsureContainer(context.Background())
 	if !errors.Is(err, storage.ErrUnavailable) || !errors.Is(err, storagetest.ErrDown) {
 		t.Errorf("EnsureContainer during an outage = %v, want the fake's classified error", err)
@@ -460,12 +460,12 @@ func TestStore_ReadySelfHeals(t *testing.T) {
 	f := storagetest.NewFake()
 	s := startedStore(t, f, 0, 0)
 
-	f.Down.Store(true)
+	f.SetDown(true)
 	if s.Ready() {
 		t.Error("Ready() = true during an outage, want false")
 	}
 
-	f.Down.Store(false)
+	f.SetDown(false)
 	if !s.Ready() {
 		t.Error("Ready() = false after the outage cleared, want true")
 	}
@@ -487,7 +487,7 @@ func TestStore_ProbeUsesCallerContext(t *testing.T) {
 		t.Error("Probe added a deadline to a background context, want the caller's context passed through")
 	}
 
-	f.Down.Store(true)
+	f.SetDown(true)
 	if err := s.Probe(context.Background()); !errors.Is(err, storage.ErrUnavailable) {
 		t.Errorf("Probe during an outage = %v, want ErrUnavailable", err)
 	}
@@ -516,7 +516,7 @@ func TestStore_ShutdownIsSafeAtEveryPoint(t *testing.T) {
 
 	t.Run("after a failed Start", func(t *testing.T) {
 		f := storagetest.NewFake()
-		f.Down.Store(true)
+		f.SetDown(true)
 		s := storage.New(f, finalizedConfig(t, 0, 0))
 		if err := s.Start(context.Background()); err == nil {
 			t.Fatal("Start succeeded against a fake in outage")
@@ -534,6 +534,188 @@ func TestStore_ShutdownIsSafeAtEveryPoint(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestStore_StartAfterShutdownIsNotReady(t *testing.T) {
+	c := newClosingFake(nil)
+	s := startedStore(t, c, 0, 0)
+	if err := s.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	ensures, probes := c.Ensures(), c.Probes()
+
+	if err := s.Start(context.Background()); !errors.Is(err, storage.ErrNotReady) {
+		t.Errorf("Start after Shutdown = %v, want ErrNotReady", err)
+	}
+	// The closed client is never called again.
+	if c.Ensures() != ensures || c.Probes() != probes {
+		t.Errorf("Start after Shutdown reached the client: ensures %d->%d, probes %d->%d", ensures, c.Ensures(), probes, c.Probes())
+	}
+	if s.Ready() {
+		t.Error("Ready() = true after Start following Shutdown, want false")
+	}
+	wantNotReady(t, s, c.Fake)
+}
+
+func TestStore_ShutdownDuringStartProbe(t *testing.T) {
+	f := &blockingProbeClient{Fake: storagetest.NewFake(), entered: make(chan struct{}), release: make(chan struct{})}
+	s := storage.New(f, finalizedConfig(t, 0, 0))
+
+	started := make(chan error, 1)
+	go func() { started <- s.Start(context.Background()) }()
+	<-f.entered
+	if err := s.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	close(f.release)
+
+	if err := <-started; !errors.Is(err, storage.ErrNotReady) {
+		t.Errorf("Start whose probe outlived a Shutdown = %v, want ErrNotReady", err)
+	}
+	if s.Ready() {
+		t.Error("Ready() = true after Shutdown landed during Start, want false")
+	}
+	wantNotReady(t, s, f.Fake)
+}
+
+func TestStore_ShutdownDuringStartProbeThatFails(t *testing.T) {
+	// A closed transport fails the probe that Shutdown outlived.
+	closed := errors.New("transport closed")
+	f := &blockingProbeClient{Fake: storagetest.NewFake(), entered: make(chan struct{}), release: make(chan struct{}), err: closed}
+	s := storage.New(f, finalizedConfig(t, 0, 0))
+
+	started := make(chan error, 1)
+	go func() { started <- s.Start(context.Background()) }()
+	<-f.entered
+	if err := s.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	close(f.release)
+
+	err := <-started
+	if !errors.Is(err, storage.ErrNotReady) {
+		t.Errorf("Start whose probe failed after a Shutdown = %v, want ErrNotReady", err)
+	}
+	if errors.Is(err, storage.ErrUnavailable) {
+		t.Errorf("Start whose probe failed after a Shutdown = %v, want it not to match ErrUnavailable", err)
+	}
+	wantNotReady(t, s, f.Fake)
+}
+
+func TestStore_ShutdownDuringStartEnsure(t *testing.T) {
+	f := &blockingEnsureClient{Fake: storagetest.NewFake(), entered: make(chan struct{}), release: make(chan struct{})}
+	s := storage.New(f, finalizedConfig(t, 0, 0))
+
+	started := make(chan error, 1)
+	go func() { started <- s.Start(context.Background()) }()
+	<-f.entered
+	if err := s.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	close(f.release)
+
+	if err := <-started; !errors.Is(err, storage.ErrNotReady) {
+		t.Errorf("Start whose container check outlived a Shutdown = %v, want ErrNotReady", err)
+	}
+	if got := f.Probes(); got != 0 {
+		t.Errorf("probes = %d, want 0: Start probed a client Shutdown had closed", got)
+	}
+	wantNotReady(t, s, f.Fake)
+}
+
+// blockingProbeClient is a fake whose Probe signals entered and then waits
+// for release, so a test can act while Start is probing. A non-nil err is
+// what the probe then returns in place of the fake's result.
+type blockingProbeClient struct {
+	*storagetest.Fake
+	entered chan struct{}
+	release chan struct{}
+	err     error
+}
+
+func (c *blockingProbeClient) Probe(ctx context.Context) error {
+	close(c.entered)
+	<-c.release
+	if c.err != nil {
+		return c.err
+	}
+	return c.Fake.Probe(ctx)
+}
+
+// blockingEnsureClient is a fake whose EnsureContainer signals entered and
+// then waits for release, so a test can act while Start checks the
+// container.
+type blockingEnsureClient struct {
+	*storagetest.Fake
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingEnsureClient) EnsureContainer(ctx context.Context) error {
+	close(c.entered)
+	<-c.release
+	return c.Fake.EnsureContainer(ctx)
+}
+
+func TestStore_StartReturnsCallerCancellation(t *testing.T) {
+	f := &ctxEnsureClient{Fake: storagetest.NewFake()}
+	s := storage.New(f, finalizedConfig(t, 0, 0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := s.Start(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Start under a cancelled context = %v, want context.Canceled", err)
+	}
+	if errors.Is(err, storage.ErrUnavailable) {
+		t.Errorf("Start under a cancelled context = %v, want it not to match ErrUnavailable", err)
+	}
+	if s.Ready() {
+		t.Error("Ready() = true after a cancelled Start, want false")
+	}
+}
+
+func TestStore_StartCallerDeadlineOutranksProviderClassification(t *testing.T) {
+	// The provider reports the caller's expired deadline as an outage of its
+	// own, an error that does not match context.DeadlineExceeded.
+	f := &failingEnsureClient{Fake: storagetest.NewFake(), err: fmt.Errorf("%w: request timed out", storage.ErrUnavailable)}
+	s := storage.New(f, finalizedConfig(t, 0, 0))
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	err := s.Start(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Start past the caller's deadline = %v, want context.DeadlineExceeded", err)
+	}
+	if errors.Is(err, storage.ErrUnavailable) {
+		t.Errorf("Start past the caller's deadline = %v, want it not to match ErrUnavailable", err)
+	}
+	if !strings.Contains(err.Error(), "request timed out") {
+		t.Errorf("error %q drops the provider's text", err)
+	}
+}
+
+// failingEnsureClient is a fake whose EnsureContainer returns err.
+type failingEnsureClient struct {
+	*storagetest.Fake
+	err error
+}
+
+func (c *failingEnsureClient) EnsureContainer(context.Context) error {
+	return c.err
+}
+
+// ctxEnsureClient is a fake whose EnsureContainer fails with its context's
+// error, as a provider's request does once the context is done.
+type ctxEnsureClient struct {
+	*storagetest.Fake
+}
+
+func (c *ctxEnsureClient) EnsureContainer(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.Fake.EnsureContainer(ctx)
 }
 
 func TestStore_ShutdownClosesClientOnce(t *testing.T) {
@@ -1061,6 +1243,55 @@ func TestStore_PutDeclaredSizeLeavesExistingObject(t *testing.T) {
 	}
 	if after != before {
 		t.Errorf("Stat after a rejected replace = %+v, want the original %+v", after, before)
+	}
+}
+
+func TestStore_PutRejectsNegativeSize(t *testing.T) {
+	f := storagetest.NewFake()
+	s := startedStore(t, f, 0, 0)
+
+	_, err := s.Put(context.Background(), "k", strings.NewReader("v"), storage.PutOptions{Size: -1})
+	if err == nil || !strings.Contains(err.Error(), "-1") {
+		t.Errorf("Put with Size -1 = %v, want an error naming the size", err)
+	}
+	if got := f.Puts(); got != 0 {
+		t.Errorf("puts = %d, want 0: the provider never sees a negative Size", got)
+	}
+}
+
+func TestStore_PutValidatesKey(t *testing.T) {
+	rejected := errors.New("key rejected")
+	f := storagetest.NewFake(storagetest.WithCapabilities(storage.Capabilities{
+		MaxKeyLength: 8,
+		ValidateKey: func(key string) error {
+			if strings.HasPrefix(key, "/") {
+				return rejected
+			}
+			return nil
+		},
+	}))
+	s := startedStore(t, f, 0, 0)
+
+	if _, err := s.Put(context.Background(), "/abs", strings.NewReader("v"), storage.PutOptions{}); !errors.Is(err, rejected) {
+		t.Errorf("Put of a rejected key = %v, want the ValidateKey error", err)
+	}
+	if got := f.Puts(); got != 0 {
+		t.Errorf("puts = %d, want 0: a rejected key never reaches the provider", got)
+	}
+	putString(t, s, "rel", "v")
+}
+
+func TestStore_PutNilValidateKeyAcceptsEveryKey(t *testing.T) {
+	f := storagetest.NewFake(storagetest.WithCapabilities(storage.Capabilities{MaxKeyLength: 1024}))
+	s := startedStore(t, f, 0, 0)
+
+	for _, key := range []string{"", "/abs", "a//b", strings.Repeat("k", 2048)} {
+		if _, err := s.Put(context.Background(), key, strings.NewReader("v"), storage.PutOptions{}); err != nil {
+			t.Errorf("Put(%q) with a nil ValidateKey = %v, want nil", key, err)
+		}
+	}
+	if got := f.Puts(); got != 4 {
+		t.Errorf("puts = %d, want 4: a nil ValidateKey passes every key to the provider", got)
 	}
 }
 

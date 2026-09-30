@@ -7,6 +7,48 @@ only; each provider sub-module keeps its own.
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-09-30
+
+### Added
+
+- `Config.Finalized` reports whether the last `Finalize` succeeded, so a provider's constructor can
+  detect an unfinalized configuration. A copy of a finalized `Config` stays finalized; a decoded
+  `Config` that was never finalized, or one whose `Finalize` failed, is not.
+- `storagetest.Fake.SetDown` starts or ends the Fake's outage.
+
+### Changed
+
+- The `go-core` requirement is v0.5.0.
+- **Breaking:** `Store.Shutdown` is terminal. `Start` after `Shutdown` returns `ErrNotReady` without
+  calling the provider. A `Shutdown` that lands while `Start` runs leaves the store not started:
+  `Start` returns `ErrNotReady`, even when the closed client then fails, and it skips the probe
+  when the client was closed while `Start` ensured the container.
+- **Breaking:** `Store.Put` checks the key with the provider's `Capabilities().ValidateKey` and
+  returns its error before the provider sees the key. A nil `ValidateKey` accepts every key.
+  `Store.Put` also rejects a negative `PutOptions.Size`.
+- **Breaking:** a `Put` without a `ContentType` stores and reports `application/octet-stream`.
+  `storagetest.Fake` does so, and the conformance suite checks the `ContentType` of every `Put`,
+  `Get`, and `Stat` it makes.
+- **Breaking:** `storagetest.Fake`'s exported `Down` field is replaced by `SetDown`.
+- **Breaking:** the conformance suite fails a missing key whose error also matches
+  `ErrContainerNotFound` or `ErrUnavailable`, so a provider that passed v0.2.1's suite may fail
+  this one.
+- Every `Config` validation error has the form `storage: <field> <problem>`.
+- The package documentation states each contract fact once, beside the symbol it governs, and
+  each package comment lists the package's exports.
+
+### Fixed
+
+- Once the caller's context is done, `Store.Start` reports a failure as an error that `errors.Is`
+  matches to that context's error, not as `ErrUnavailable`, even when the provider classified the
+  failure as `ErrUnavailable`.
+- `Config.Merge` copies `Options` before writing, so an overlay never reaches a map the caller
+  shares.
+- `storagetest.WithPageSize` with 0 or less keeps the default page size, where `Fake.List` used
+  to panic.
+- `storagetest.Fake.Put` reads the body and records the call before it reports an outage or a
+  missing container, as its documentation states.
+
 ## [v0.2.1] - 2026-09-29
 
 ### Added
@@ -83,7 +125,8 @@ only; each provider sub-module keeps its own.
   entity-tag form and equal across `Put`, `Get`, `Stat`, and `List`. `Fake` enforces `Size`
   and reports a quoted ETag.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.3.0...HEAD
+[v0.3.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.3.0
 [v0.2.1]: https://github.com/standards-lab/go-storage/releases/tag/v0.2.1
 [v0.2.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.1.0

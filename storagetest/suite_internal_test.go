@@ -230,6 +230,42 @@ func (c *overwritesBeforeFailing) Put(ctx context.Context, key string, body io.R
 	return c.Fake.Put(ctx, key, body, opts)
 }
 
+// alsoClassifies wraps a missing key's error under a second sentinel as
+// well, so it matches ErrNotFound and also.
+type alsoClassifies struct {
+	*Fake
+	also error
+}
+
+func (c *alsoClassifies) Get(ctx context.Context, key string, opts storage.GetOptions) (storage.Blob, error) {
+	blob, err := c.Fake.Get(ctx, key, opts)
+	return blob, c.wrap(err)
+}
+
+func (c *alsoClassifies) Stat(ctx context.Context, key string) (storage.Object, error) {
+	obj, err := c.Fake.Stat(ctx, key)
+	return obj, c.wrap(err)
+}
+
+func (c *alsoClassifies) wrap(err error) error {
+	if errors.Is(err, storage.ErrNotFound) {
+		return fmt.Errorf("%w: %w", c.also, err)
+	}
+	return err
+}
+
+// noDefaultContentType reports an empty ContentType for a Put without one,
+// where the contract asks for application/octet-stream.
+type noDefaultContentType struct{ *Fake }
+
+func (c *noDefaultContentType) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
+	obj, err := c.Fake.Put(ctx, key, body, opts)
+	if opts.ContentType == "" {
+		obj.ContentType = ""
+	}
+	return obj, err
+}
+
 func TestCases_CatchBrokenClients(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -253,6 +289,9 @@ func TestCases_CatchBrokenClients(t *testing.T) {
 		{"Put overwrites the existing object before failing", &overwritesBeforeFailing{NewFake()}, "PutBodyFailsMidway"},
 		{"Put stores the body ignoring Size", &ignoresSize{NewFake()}, "PutSizeMismatch"},
 		{"Put truncates the body to Size", &truncatesToSize{NewFake()}, "PutSizeMismatch"},
+		{"a missing key also matches ErrContainerNotFound", &alsoClassifies{NewFake(), storage.ErrContainerNotFound}, "MissingKey"},
+		{"a missing key also matches ErrUnavailable", &alsoClassifies{NewFake(), storage.ErrUnavailable}, "MissingKey"},
+		{"Put reports no ContentType when none was given", &noDefaultContentType{NewFake()}, "PutUnknownSize"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -7,27 +7,22 @@ import "errors"
 // fmt.Errorf("%w: %w", sentinel, err), so errors.Is matches the class while
 // the cause stays recoverable.
 var (
-	// ErrNotFound reports that no object exists at the key. Get and Stat
-	// return it for a missing key. Delete never does: deleting a missing
-	// key is a no-op success.
+	// ErrNotFound reports that no object exists at the key.
 	ErrNotFound = errors.New("storage object not found")
 
 	// ErrContainerNotFound reports that the configured container does not
-	// exist. Probe and every object operation, Delete included, return it
-	// while the container is missing. It never matches [ErrNotFound]: a
-	// missing container is a fault in the store, not an absent object.
-	// EnsureContainer creates the container and clears the condition.
+	// exist. It never matches [ErrNotFound].
 	ErrContainerNotFound = errors.New("storage container not found")
 
-	// ErrTooLarge reports a Put body that exceeds Config.MaxObjectSize.
-	// [Store] rejects the body before it reaches the provider.
+	// ErrTooLarge reports a Put whose declared or actual size exceeds
+	// Config.MaxObjectSize.
 	ErrTooLarge = errors.New("storage object too large")
 
 	// ErrNotReady reports a call against a [Store] before a successful Start
 	// or after Shutdown.
 	ErrNotReady = errors.New("storage not ready")
 
-	// ErrUnavailable classifies a connectivity failure: the store is
-	// unreachable. A provider returns it wrapped around its SDK's error.
+	// ErrUnavailable reports a connectivity failure: the store is
+	// unreachable.
 	ErrUnavailable = errors.New("storage unavailable")
 )

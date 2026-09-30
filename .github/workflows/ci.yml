@@ -7,8 +7,7 @@ on:
     branches: [main]
 
 # The module matrix grows with the repository: each new module is added here, to
-# the go.work use-list, and to mise GO_MODULES together. Steps are guarded on the
-# module's go.mod so a matrix entry stays green until that module lands.
+# the go.work use-list, and to mise GO_MODULES together.
 jobs:
   test:
     strategy:
@@ -29,32 +28,44 @@ jobs:
       # proxy the way a consumer does; the committed go.work would otherwise mask
       # a pin that no longer builds.
       - name: go build (GOWORK=off)
-        if: ${{ hashFiles(format('{0}/go.mod', matrix.module)) != '' }}
         working-directory: ${{ matrix.module }}
         env:
           GOWORK: "off"
         run: go build ./...
 
       - name: go vet
-        if: ${{ hashFiles(format('{0}/go.mod', matrix.module)) != '' }}
         working-directory: ${{ matrix.module }}
         run: go vet ./...
 
       - name: gofmt
-        if: ${{ hashFiles(format('{0}/go.mod', matrix.module)) != '' }}
         working-directory: ${{ matrix.module }}
         run: |
           unformatted=$(gofmt -l .)
           [ -z "$unformatted" ] || { echo "$unformatted"; exit 1; }
 
       - name: go mod tidy -diff
-        if: ${{ hashFiles(format('{0}/go.mod', matrix.module)) != '' }}
         working-directory: ${{ matrix.module }}
         run: go mod tidy -diff
 
+      # azureblob's acceptance tests run the conformance suite against an
+      # Azurite container, which a step starts because a service container
+      # cannot take Azurite's command-line flags.
+      - name: start Azurite
+        if: matrix.module == 'azureblob'
+        run: |
+          docker run -d --name azurite -p 10000:10000 mcr.microsoft.com/azure-storage/azurite:3.37.0 \
+            azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck --loose
+          for _ in $(seq 30); do
+            curl -s -o /dev/null http://127.0.0.1:10000/ && exit 0
+            sleep 1
+          done
+          docker logs azurite
+          exit 1
+
       - name: go test -race
-        if: ${{ hashFiles(format('{0}/go.mod', matrix.module)) != '' }}
         working-directory: ${{ matrix.module }}
+        env:
+          AZUREBLOB_TEST_ENDPOINT: ${{ matrix.module == 'azureblob' && 'http://127.0.0.1:10000/devstoreaccount1' || '' }}
         run: go test -race ./...
 
   lint:
@@ -69,7 +80,6 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: golangci-lint
-        if: ${{ hashFiles(format('{0}/go.mod', matrix.module)) != '' }}
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.13.2

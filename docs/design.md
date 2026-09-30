@@ -37,13 +37,26 @@ for SQL rendering.
 
 `PutOptions.Size` is explicit because the SDKs disagree: Azure chunks an unknown-length reader on
 its own, while the AWS SDK needs a seekable body or a known length to sign the request. Passing a
-known `Content-Length` through keeps the common path free of buffering.
+known `Content-Length` through keeps the common path free of buffering: a provider that must know
+the length buffers the body only when `Size` is 0.
+
+An empty `ContentType` stores `application/octet-stream` because that is what Azure stores for a
+blob written without one. A provider sends the type itself rather than trusting its service's
+default, so the object `Put` reports equals what `Stat` later reads on every provider.
 
 ## `Store` is the call surface
 
 `Store` implements `Client` itself rather than only wrapping the provider. Nothing sits above the
 store to carry the calls, so `Store` is where the size bound, the declared size, and the
 readiness gate are enforced for every consumer.
+
+`Store.Put` checks a key with the provider's `ValidateKey` before the provider sees it, so a bad
+key is a local error rather than a provider's 400. It keeps its own size and declared-size checks
+as defence in depth, although a conforming provider enforces the declared size too.
+
+`Shutdown` is terminal. A provider may close its transport on `Shutdown`, so a later `Start` would
+run over a closed client; `Start` returns `ErrNotReady` instead, including when a `Shutdown` lands
+while its probe is in flight.
 
 `Start` creates the container when it is missing, so an empty store starts cleanly and a process
 never exits for want of a container nothing else would create. The cost is that the serving
@@ -60,7 +73,22 @@ the account's shared key, which keeps `azidentity` and MSAL out of `azureblob` u
 needs managed identity. `MaxObjectSize` and `ListPageSize` have no default because a library ships
 no policy numbers; 0 means unset, and pointer fields were rejected because an explicit zero means
 nothing different. `RequestTimeout` has a default because it bounds only the calls `Store` makes
-for itself; one timeout over every operation would cut off a large upload.
+for itself; one timeout over every operation would cut off a large upload. A per-request deadline
+on the object operations belongs to the provider's transport instead: `azureblob`'s
+`try_timeout` is that deadline, so a stalled store cannot hold a request indefinitely. It bounds
+each try of a `Put` or a metadata call, not the whole call with its retries. A `Get` is
+one try whose deadline runs until its body is read, so the caller must read and close the body
+within `try_timeout` of the request, at its own pace; past the deadline the body's `Read` fails
+with an unclassified `context.DeadlineExceeded`.
+
+`azureblob`'s upload defaults trade memory for requests. A 4 MiB block is four times the SDK's
+1 MiB floor, so a multi-block body takes a quarter of the requests while the service's
+50,000-block limit still admits about 195 GiB, and four workers overlap request latency on one
+upload at 16 MiB per `Put`. The block ceiling is 100 MiB, the largest the service accepted before
+version 2019-12-12, and the worker ceiling of 32 already reaches 128 MiB per `Put` at the default
+block. The SDK allocates each block buffer with an anonymous mmap as it is needed, so a body
+shorter than one block holds one buffer. A process holds up to that per-`Put` figure once for each
+of its concurrent `Put`s.
 
 ## Swapping providers
 

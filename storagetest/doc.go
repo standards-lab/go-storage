@@ -1,18 +1,38 @@
 // Package storagetest is the test support for storage.Client: an in-memory
-// [Fake] a consumer's hermetic tests run over, and [Run], the conformance
-// suite a provider sub-module runs against its own adapter. It imports the
-// testing package, as a test-support package does, and nothing outside the
-// standard library and the base module.
+// [Fake] that a consumer's hermetic tests run over, and [Run] and
+// [RunMissingContainer], the conformance checks a provider sub-module runs
+// against its own adapter. It imports nothing outside the standard library
+// and the base module.
+//
+// # The Fake
 //
 // [NewFake] returns a Fake whose container exists and that holds no objects.
-// It honors the Client contract, so a storage.Store wraps it the way it wraps
-// a provider, and it records what it received: LastPut, LastList, LastProbe,
-// and LastEnsure report the most recent call, and Puts, Probes, and Ensures
-// count them. Its Down toggle fails every method with storage.ErrUnavailable,
-// FailPut fails the next Puts after their body is read, and DropContainer
-// removes the container so a test can watch EnsureContainer recover it. A
-// test that needs one method to misbehave embeds *Fake in its own type and
-// overrides that method.
+// A storage.Store wraps a Fake the way it wraps a provider. Each [Option]
+// changes one default at construction:
+//
+//   - [WithCapabilities] replaces the default key rules, whose length cap
+//     is [DefaultMaxKeyLength].
+//   - [WithClock] sets the clock that stamps ModifiedAt.
+//   - [WithPageSize] sets the page size of a List without a Limit.
+//   - [WithoutContainer] starts the Fake with no container.
+//
+// Beyond the storage.Client methods, a Fake has methods that cause faults
+// and report what it received:
+//
+//   - [Fake.SetDown] starts or ends an outage.
+//   - [Fake.FailPut] makes every later Put fail with a given error.
+//   - [Fake.DropContainer] deletes the container and its objects.
+//   - [Fake.HasContainer] reports whether the container exists.
+//   - [Fake.Puts], [Fake.Ensures], and [Fake.Probes] count calls.
+//   - [Fake.LastPut] and [Fake.LastList] report the most recent call's
+//     options, and [Fake.LastEnsure] and [Fake.LastProbe] its context
+//     deadline.
+//
+// A failing Fake wraps a cause under the storage sentinel: [ErrDown] under
+// ErrUnavailable, [ErrNoSuchKey] under ErrNotFound, and [ErrNoSuchContainer]
+// under ErrContainerNotFound.
+//
+// # Conformance
 //
 // [Run] proves a Client implementation against the contract the interface
 // documents. A provider calls it from its own test with a constructor that
@@ -32,14 +52,6 @@
 //		})
 //	}
 //
-// Every key the suite writes sits under a random prefix, and each subtest
-// deletes what it wrote, so the suite runs against a shared container that
-// holds other objects. The Fake passes the suite, and the package's own tests
-// prove that a client which breaks the contract fails it.
-//
-// A provider runs both entry points. [RunMissingContainer] proves that a
-// client wired to a container that does not exist reports it as
-// storage.ErrContainerNotFound, never storage.ErrNotFound, on Probe and on
-// every object operation. It never creates the container, so over a
-// conforming client it needs no cleanup.
+// A provider runs [RunMissingContainer] too, over a client wired to a
+// container that does not exist.
 package storagetest

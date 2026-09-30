@@ -6,8 +6,8 @@ the text that states it.
 `azureblob` passes the conformance suite against Azurite, started with `--skipApiVersionCheck`,
 and no live Azure account has run it:
 
-- **`ValidateKey`'s rules.** They come from Azure's documentation. Azurite accepts every key that
-  breaks them, so only unit tests cover them.
+- **`ValidateKey`'s rules and the container-name rules `New` applies.** They come from Azure's
+  documentation. Azurite accepts every key that breaks them, so only unit tests cover them.
 - **The listing ETag form.** Azure is documented to leave the tag unquoted in a listing's XML and
   quote it in headers, which is why the adapter quotes it.
 - **The listing marker.** The adapter passes `NextMarker` back verbatim and never reads it.

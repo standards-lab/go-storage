@@ -2,6 +2,7 @@ package azureblob_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -112,7 +113,9 @@ func TestPut_SendsBodyAndContentType(t *testing.T) {
 	}
 }
 
-func TestPut_NoContentTypeSendsNoHeader(t *testing.T) {
+// A Put without a ContentType sends and reports application/octet-stream,
+// the type the service would store anyway.
+func TestPut_NoContentTypeSendsOctetStream(t *testing.T) {
 	svc := newService(t, blobStored(testETag, testLastModified))
 	c := newClient(t, testConfig(t, svc.endpoint(), nil))
 
@@ -120,9 +123,9 @@ func TestPut_NoContentTypeSendsNoHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Put = %v, want nil", err)
 	}
-	wantObject(t, "Put", obj, "k", 5, "")
-	if _, ok := svc.Requests()[0].Header["X-Ms-Blob-Content-Type"]; ok {
-		t.Error("x-ms-blob-content-type was sent for a Put without a ContentType")
+	wantObject(t, "Put", obj, "k", 5, "application/octet-stream")
+	if got := svc.Requests()[0].Header.Get("x-ms-blob-content-type"); got != "application/octet-stream" {
+		t.Errorf("x-ms-blob-content-type = %q, want application/octet-stream", got)
 	}
 }
 
@@ -136,7 +139,7 @@ func TestPut_NonSeekableBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Put = %v, want nil", err)
 	}
-	wantObject(t, "Put", obj, "k", int64(len(content)), "")
+	wantObject(t, "Put", obj, "k", int64(len(content)), "application/octet-stream")
 	if reqs := svc.Requests(); len(reqs) != 1 || !bytes.Equal(reqs[0].Body, content) {
 		t.Fatalf("service saw %d requests, want one carrying the whole body", len(reqs))
 	}
@@ -306,7 +309,7 @@ func TestPut_DeclaredSize(t *testing.T) {
 					if err != nil {
 						t.Fatalf("Put = %v, want nil", err)
 					}
-					wantObject(t, "Put", obj, "k", int64(shape.length), "")
+					wantObject(t, "Put", obj, "k", int64(shape.length), "application/octet-stream")
 					wantCommit(t, svc.Requests(), shape.blocks)
 					return
 				}
@@ -432,6 +435,39 @@ func TestGet_MapsHeadersAndBody(t *testing.T) {
 	reqs := svc.Requests()
 	if len(reqs) != 1 || reqs[0].Method != http.MethodGet || reqs[0].Path != blobPath("dir/hello.txt") {
 		t.Fatalf("service saw %+v, want one GET of the blob", reqs)
+	}
+}
+
+// try_timeout's deadline covers the reading of a Get's body, which the
+// caller paces, so a body that stalls past it fails the read. The expiry
+// surfaces from Read as context.DeadlineExceeded, unclassified.
+func TestGet_TryTimeoutBoundsTheBody(t *testing.T) {
+	svc := newService(t, func(w http.ResponseWriter, r *http.Request) {
+		blobHeaders(w, testETag, testLastModified)
+		w.Header().Set("Content-Length", "10")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "hello")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "200ms"}))
+
+	blob, err := c.Get(t.Context(), "k", storage.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get = %v, want nil: the headers arrive within the try timeout", err)
+	}
+	defer func() { _ = blob.Body.Close() }()
+
+	start := time.Now()
+	data, err := io.ReadAll(blob.Body)
+	if err == nil {
+		t.Fatalf("read of a stalled body = %q, nil; want the try timeout's error", data)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, storage.ErrUnavailable) {
+		t.Errorf("read error = %v, want the unclassified context.DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("read took %v, want it cut off near the 200ms try timeout", elapsed)
 	}
 }
 

@@ -12,26 +12,8 @@ import (
 	"github.com/standards-lab/go-storage"
 )
 
-// classify maps an SDK error into the storage package's sentinels, wrapped
-// in the dual form fmt.Errorf("%w: %w", sentinel, err) so the SDK's error
-// stays matchable. Every method returns through it. A nil error stays nil,
-// and an error that already matches a sentinel is returned unchanged.
-//
-// A service response (an *azcore.ResponseError) is classified by its error
-// code and status: BlobNotFound matches storage.ErrNotFound,
-// ContainerNotFound matches storage.ErrContainerNotFound, and a 5xx status
-// or one of the retryable codes ServerBusy, OperationTimedOut, and
-// InternalError matches storage.ErrUnavailable. Every other response, an
-// authentication or authorization failure included, is returned
-// unclassified.
-//
-// An error with no response is a transport failure: a refused connection, a
-// DNS failure, or a deadline the SDK's retry policy consumed. Each matches
-// storage.ErrUnavailable. The one exception is context.Canceled, which the
-// caller raised on purpose and which says nothing about the store; it passes
-// through unclassified. A deadline is classified because the store did not
-// answer inside the time the caller allowed, and the wrapped error still
-// matches context.DeadlineExceeded for a caller that wants the distinction.
+// classify maps an SDK error into the storage sentinels as the package
+// documentation lists; nil and an already classified error pass through.
 func classify(err error) error {
 	if err == nil {
 		return nil

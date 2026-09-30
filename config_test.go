@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"encoding/json"
 	"maps"
 	"os"
 	"path/filepath"
@@ -80,6 +81,19 @@ func TestConfig_MergeOptionsKeyWise(t *testing.T) {
 	}
 }
 
+// Merge writes into a copy, so a map the receiver shares with the caller
+// keeps its values.
+func TestConfig_MergeCopiesOptions(t *testing.T) {
+	shared := map[string]string{"max_retries": "4"}
+	base := storage.Config{Container: "assets", Options: shared}
+
+	base.Merge(&storage.Config{Options: map[string]string{"max_retries": "1"}})
+
+	if shared["max_retries"] != "4" || base.Options["max_retries"] != "1" {
+		t.Errorf("shared = %v, config = %v; want the overlay on the config alone", shared, base.Options)
+	}
+}
+
 func TestConfig_MergeOptionsOntoNilMap(t *testing.T) {
 	base := storage.Config{Container: "assets"}
 	overlay := storage.Config{Options: map[string]string{"region": "us-east-1"}}
@@ -127,7 +141,7 @@ func TestConfig_FinalizeRequiresContainer(t *testing.T) {
 	if err == nil {
 		t.Fatal("Finalize accepted a config with no container")
 	}
-	if !strings.Contains(err.Error(), "container required") {
+	if err.Error() != "storage: container is required" {
 		t.Errorf("error = %v, want it to name the missing field", err)
 	}
 }
@@ -274,31 +288,31 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			"missing container",
 			func(c *storage.Config) { c.Container = "" },
-			"container required",
+			"storage: container is required",
 		},
 		{
 			"negative max object size",
 			func(c *storage.Config) { c.MaxObjectSize = -1 },
-			"invalid max_object_size",
+			"storage: max_object_size must not be negative, got -1",
 		},
 		{
 			"negative list page size",
 			func(c *storage.Config) { c.ListPageSize = -1 },
-			"invalid list_page_size",
+			"storage: list_page_size must not be negative, got -1",
 		},
 		{
 			"zero request timeout",
 			func(c *storage.Config) {
 				c.RequestTimeout = new(config.Duration(0))
 			},
-			"request_timeout must be positive",
+			"storage: request_timeout must be positive, got 0s",
 		},
 		{
 			"negative request timeout",
 			func(c *storage.Config) {
 				c.RequestTimeout = new(config.Duration(-time.Second))
 			},
-			"request_timeout must be positive",
+			"storage: request_timeout must be positive, got -1s",
 		},
 	}
 	for _, tc := range cases {
@@ -310,8 +324,8 @@ func TestConfig_Validate(t *testing.T) {
 			if err == nil {
 				t.Fatal("Finalize accepted an invalid config")
 			}
-			if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Errorf("error = %v, want it to contain %q", err, tc.wantErr)
+			if err.Error() != tc.wantErr {
+				t.Errorf("error = %v, want %q", err, tc.wantErr)
 			}
 		})
 	}
@@ -370,5 +384,48 @@ func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func TestConfig_Finalized(t *testing.T) {
+	cfg := validConfig()
+	if cfg.Finalized() {
+		t.Error("Finalized() = true before Finalize, want false")
+	}
+	if err := cfg.Finalize(""); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if !cfg.Finalized() {
+		t.Error("Finalized() = false after Finalize, want true")
+	}
+	if cp := cfg; !cp.Finalized() {
+		t.Error("Finalized() = false on a copy of a finalized Config, want true")
+	}
+}
+
+func TestConfig_FinalizedNeedsFinalize(t *testing.T) {
+	var decoded storage.Config
+	if err := json.Unmarshal([]byte(`{"container":"assets","request_timeout":"5s"}`), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if decoded.RequestTimeout == nil {
+		t.Fatal("decode left request_timeout unset")
+	}
+	if decoded.Finalized() {
+		t.Error("Finalized() = true on a decoded Config never finalized, want false")
+	}
+}
+
+func TestConfig_FinalizedFalseAfterFailedFinalize(t *testing.T) {
+	cfg := validConfig()
+	if err := cfg.Finalize(""); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	cfg.ListPageSize = -1
+	if err := cfg.Finalize(""); err == nil {
+		t.Fatal("Finalize accepted a negative list_page_size")
+	}
+	if cfg.Finalized() {
+		t.Error("Finalized() = true after a Finalize that failed validation, want false")
 	}
 }

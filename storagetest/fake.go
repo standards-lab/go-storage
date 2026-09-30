@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,9 +29,12 @@ const DefaultMaxKeyLength = 1024
 // a handful of objects pages.
 const defaultPageSize = 3
 
+// defaultContentType is the ContentType a Put without one stores.
+const defaultContentType = "application/octet-stream"
+
 var (
 	// ErrDown is the cause a Fake wraps under storage.ErrUnavailable while
-	// Down is set.
+	// it is down.
 	ErrDown = errors.New("storagetest: connection refused")
 
 	// ErrNoSuchKey is the cause a Fake wraps under storage.ErrNotFound for a
@@ -43,26 +46,21 @@ var (
 	ErrNoSuchContainer = errors.New("storagetest: no such container")
 )
 
-// Fake is an in-memory storage.Client. It honors the Client contract, so a
-// test can wrap it in a storage.Store or hand it to any consumer of the
-// interface, and it records what it received so a test can assert what was
-// passed through. Put stores a copy of the whole body, Get returns a copy,
-// and the ETag is a hash of the content in quoted entity-tag form, so equal
-// bodies share an ETag.
+// Fake is an in-memory storage.Client that honors the Client contract and
+// records what it received. The ETag is a quoted hash of the content, so
+// equal bodies share an ETag.
 //
-// Down is the outage toggle: while it is set, every method, EnsureContainer
-// and Probe included, fails with an error matching storage.ErrUnavailable
-// that wraps ErrDown. The container is modelled too: while it does not
-// exist, Probe and every object operation fail with an error matching
-// storage.ErrContainerNotFound that wraps ErrNoSuchContainer, and
-// EnsureContainer creates it. A Fake starts with its container in place unless
-// WithoutContainer says otherwise, and DropContainer removes it again.
+// While [Fake.SetDown] has it down, every method fails with an error matching
+// storage.ErrUnavailable that wraps ErrDown. While its container does not
+// exist ([WithoutContainer], [Fake.DropContainer]), Probe and every object
+// operation fail with an error matching storage.ErrContainerNotFound that
+// wraps ErrNoSuchContainer, and EnsureContainer creates it.
 //
 // A Fake is safe for concurrent use. A test that embeds *Fake in its own
 // type can override one method and keep the rest.
 type Fake struct {
-	// Down is the outage toggle. Every method consults it on entry.
-	Down atomic.Bool
+	// down is the outage toggle. Every method consults it.
+	down atomic.Bool
 
 	// hasContainer is the container toggle. WithoutContainer and
 	// DropContainer clear it, and EnsureContainer sets it.
@@ -114,9 +112,13 @@ func WithClock(now func() time.Time) Option {
 }
 
 // WithPageSize sets the page size List uses when Limit is 0. The default is
-// 3, so a listing of a few objects already pages.
+// 3, so a listing of a few objects already pages; an n of 0 or less keeps it.
 func WithPageSize(n int) Option {
-	return func(f *Fake) { f.pageSize = n }
+	return func(f *Fake) {
+		if n > 0 {
+			f.pageSize = n
+		}
+	}
 }
 
 // WithCapabilities replaces what Capabilities returns. The default declares
@@ -162,6 +164,11 @@ func validateKey(key string) error {
 	return nil
 }
 
+// SetDown starts or ends an outage.
+func (f *Fake) SetDown(down bool) {
+	f.down.Store(down)
+}
+
 // FailPut sets the error every subsequent Put returns after it has read its
 // body, which is when a real provider learns the outcome of its request. A
 // nil err restores normal Puts.
@@ -172,9 +179,8 @@ func (f *Fake) FailPut(err error) {
 }
 
 // DropContainer removes the container and every object in it, as if it had
-// been deleted out from under the client. Probe and the object operations
-// then fail with storage.ErrContainerNotFound until EnsureContainer creates
-// it again, empty.
+// been deleted out from under the client. EnsureContainer creates it again,
+// empty.
 func (f *Fake) DropContainer() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -244,20 +250,11 @@ func (f *Fake) noContainer() error {
 }
 
 // Put reads body to EOF and stores a copy under key, replacing any existing
-// object and its ContentType. It counts the call and records opts and the
-// bytes read before it checks Down, the container, or a FailPut error. A Put
-// that fails, whether on the body, on a Size that disagrees with the bytes
-// read, or on a FailPut error, stores nothing and leaves an existing object
-// at key as it was.
+// object. It counts the call and records opts and the bytes read before it
+// checks the outage, the container, or a FailPut error, as a provider learns
+// the outcome only after it sends the body.
 func (f *Fake) Put(_ context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
 	f.puts.Add(1)
-	if f.Down.Load() {
-		return storage.Object{}, f.unavailable()
-	}
-	if !f.hasContainer.Load() {
-		return storage.Object{}, f.noContainer()
-	}
-
 	data, readErr := io.ReadAll(body)
 
 	f.mu.Lock()
@@ -265,6 +262,12 @@ func (f *Fake) Put(_ context.Context, key string, body io.Reader, opts storage.P
 	f.lastPutOpts = opts
 	f.lastPutConsumed = int64(len(data))
 
+	if f.down.Load() {
+		return storage.Object{}, f.unavailable()
+	}
+	if !f.hasContainer.Load() {
+		return storage.Object{}, f.noContainer()
+	}
 	if readErr != nil {
 		return storage.Object{}, fmt.Errorf("fake put: %w", readErr)
 	}
@@ -278,12 +281,16 @@ func (f *Fake) Put(_ context.Context, key string, body io.Reader, opts storage.P
 		return storage.Object{}, fmt.Errorf("fake put: %w", f.putErr)
 	}
 
+	contentType := opts.ContentType
+	if contentType == "" {
+		contentType = defaultContentType
+	}
 	sum := sha256.Sum256(data)
 	obj := object{
 		meta: storage.Object{
 			Key:         key,
 			Size:        int64(len(data)),
-			ContentType: opts.ContentType,
+			ContentType: contentType,
 			ETag:        `"` + hex.EncodeToString(sum[:]) + `"`,
 			ModifiedAt:  f.now(),
 		},
@@ -295,7 +302,7 @@ func (f *Fake) Put(_ context.Context, key string, body io.Reader, opts storage.P
 
 // Get returns the object's metadata and a reader over a copy of its content.
 func (f *Fake) Get(_ context.Context, key string, _ storage.GetOptions) (storage.Blob, error) {
-	if f.Down.Load() {
+	if f.down.Load() {
 		return storage.Blob{}, f.unavailable()
 	}
 	if !f.hasContainer.Load() {
@@ -316,7 +323,7 @@ func (f *Fake) Get(_ context.Context, key string, _ storage.GetOptions) (storage
 
 // Stat returns the object's metadata.
 func (f *Fake) Stat(_ context.Context, key string) (storage.Object, error) {
-	if f.Down.Load() {
+	if f.down.Load() {
 		return storage.Object{}, f.unavailable()
 	}
 	if !f.hasContainer.Load() {
@@ -334,7 +341,7 @@ func (f *Fake) Stat(_ context.Context, key string) (storage.Object, error) {
 
 // Delete removes the object at key. A missing key is a no-op success.
 func (f *Fake) Delete(_ context.Context, key string) error {
-	if f.Down.Load() {
+	if f.down.Load() {
 		return f.unavailable()
 	}
 	if !f.hasContainer.Load() {
@@ -350,7 +357,7 @@ func (f *Fake) Delete(_ context.Context, key string) error {
 // List pages in key order. The continuation token is the last key of the
 // previous page, so a page starts at the first key after it.
 func (f *Fake) List(_ context.Context, opts storage.ListOptions) (storage.Page, error) {
-	if f.Down.Load() {
+	if f.down.Load() {
 		return storage.Page{}, f.unavailable()
 	}
 	if !f.hasContainer.Load() {
@@ -372,7 +379,7 @@ func (f *Fake) List(_ context.Context, opts storage.ListOptions) (storage.Page, 
 			keys = append(keys, key)
 		}
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 
 	var page storage.Page
 	for i, key := range keys {
@@ -397,14 +404,14 @@ func (f *Fake) EnsureContainer(ctx context.Context) error {
 	f.lastEnsureBounded = bounded
 	f.mu.Unlock()
 
-	if f.Down.Load() {
+	if f.down.Load() {
 		return f.unavailable()
 	}
 	f.hasContainer.Store(true)
 	return nil
 }
 
-// Probe succeeds while the Fake is not Down and its container exists.
+// Probe succeeds while the Fake is not down and its container exists.
 func (f *Fake) Probe(ctx context.Context) error {
 	f.probes.Add(1)
 
@@ -414,7 +421,7 @@ func (f *Fake) Probe(ctx context.Context) error {
 	f.lastProbeBounded = bounded
 	f.mu.Unlock()
 
-	if f.Down.Load() {
+	if f.down.Load() {
 		return f.unavailable()
 	}
 	if !f.hasContainer.Load() {
