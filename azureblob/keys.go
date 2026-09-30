@@ -8,32 +8,29 @@ import (
 	"unicode/utf8"
 )
 
-// The blob-name limits the Azure Blob service documents. MaxKeyLength is
-// the documented 1,024-character limit counted in runes; MaxKeySegments is
-// the documented limit on path segments for an account without a
-// hierarchical namespace.
+// The blob-name limits the package documentation lists.
 const (
-	MaxKeyLength   = 1024
-	MaxKeySegments = 254
+	maxKeyLength   = 1024
+	maxKeySegments = 254
 )
 
-// validateKey reports whether the Azure Blob service accepts key as a blob
-// name, with an error that says which rule it breaks. A key is non-empty, at
-// most MaxKeyLength runes, at most MaxKeySegments path segments separated by
-// forward slashes, free of control characters (U+0000 through U+001F and
-// U+007F through U+009F), and does not end in a dot, a forward slash, or a
-// backslash; no path segment ends in a dot either. It is the ValidateKey a
-// Client's Capabilities carries, so a consumer reaches it through
-// storage.Store.
+// The container-name length limits the package documentation lists.
+const (
+	minContainerLength = 3
+	maxContainerLength = 63
+)
+
+// validateKey reports whether the service accepts key as a blob name, with an
+// error that says which rule it breaks.
 func validateKey(key string) error {
 	if key == "" {
 		return errors.New("azureblob: empty key")
 	}
-	if n := utf8.RuneCountInString(key); n > MaxKeyLength {
-		return fmt.Errorf("azureblob: key is %d characters, the limit is %d", n, MaxKeyLength)
+	if n := utf8.RuneCountInString(key); n > maxKeyLength {
+		return fmt.Errorf("azureblob: key is %d characters, the limit is %d", n, maxKeyLength)
 	}
-	if n := strings.Count(key, "/") + 1; n > MaxKeySegments {
-		return fmt.Errorf("azureblob: key has %d path segments, the limit is %d", n, MaxKeySegments)
+	if n := strings.Count(key, "/") + 1; n > maxKeySegments {
+		return fmt.Errorf("azureblob: key has %d path segments, the limit is %d", n, maxKeySegments)
 	}
 	for i, r := range key {
 		if unicode.IsControl(r) {
@@ -47,6 +44,26 @@ func validateKey(key string) error {
 	for _, segment := range strings.Split(key, "/") {
 		if strings.HasSuffix(segment, ".") {
 			return fmt.Errorf("azureblob: key path segment %q ends in a dot", segment)
+		}
+	}
+	return nil
+}
+
+// validateContainer reports whether the service accepts name as a container
+// name, with an error that says which rule it breaks.
+func validateContainer(name string) error {
+	if n := len(name); n < minContainerLength || n > maxContainerLength {
+		return fmt.Errorf("azureblob: container name %q is %d characters, want %d to %d", name, n, minContainerLength, maxContainerLength)
+	}
+	for i := 0; i < len(name); i++ {
+		switch b := name[i]; {
+		case b >= 'a' && b <= 'z', b >= '0' && b <= '9':
+		case b == '-':
+			if i == 0 || i == len(name)-1 || name[i-1] == '-' {
+				return fmt.Errorf("azureblob: container name %q has a hyphen at its start or end or next to another", name)
+			}
+		default:
+			return fmt.Errorf("azureblob: container name %q has %q; want lowercase letters, digits, and hyphens", name, b)
 		}
 	}
 	return nil

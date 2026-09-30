@@ -12,18 +12,12 @@ import (
 	"github.com/standards-lab/go-core/config"
 )
 
-// defaultRequestTimeout bounds the readiness probe [Store] makes on its own
-// behalf. It is the one default this package ships; see [Config].
+// defaultRequestTimeout is RequestTimeout's default.
 const defaultRequestTimeout = 10 * time.Second
 
 // Config holds the identity, credential, and limits of one object storage
-// container. Env records the environment-variable names Finalize composed and
-// read; it is excluded from JSON.
-//
-// A library ships no policy numbers, so MaxObjectSize and ListPageSize have no
-// default: the application supplies them, and each stays 0 after Finalize when
-// not configured. RequestTimeout is the one default this package ships, and
-// its pointer type lets Finalize tell a configured value from an absent one.
+// container. Env records the override names Finalize composed and is
+// excluded from JSON.
 type Config struct {
 	// Endpoint is the provider's service address. The base module sets no
 	// default; each provider states what it requires.
@@ -37,22 +31,20 @@ type Config struct {
 	// default; each provider states what it requires.
 	Account string `json:"account"`
 
-	// Key is the shared-key credential. It rides the secrets layer of
-	// [config.Load] rather than a committed file, and it also takes an
-	// environment override.
+	// Key is the shared-key credential. It belongs in the secrets layer of
+	// [config.Load], not a committed file.
 	Key string `json:"key"`
 
 	// Options carries provider-specific settings that the provider reads.
-	// Each option takes an environment override: the variable
-	// Env.Options_<KEY>, where KEY is the option's key in upper case.
+	// Each option takes an environment override; see [Env].
 	Options map[string]string `json:"options"`
 
 	// MaxObjectSize is the largest body [Store] accepts in a Put, in bytes.
-	// 0 means unbounded.
+	// It has no default; 0 means unbounded.
 	MaxObjectSize int64 `json:"max_object_size"`
 
 	// ListPageSize is the page size [Store] requests when a List call sets no
-	// Limit. 0 means the provider's own page size.
+	// Limit. It has no default; 0 means the provider's own page size.
 	ListPageSize int `json:"list_page_size"`
 
 	// RequestTimeout bounds the calls [Store] makes on its own behalf: the
@@ -64,10 +56,11 @@ type Config struct {
 	Env Env `json:"-"`
 }
 
-// Merge overlays src's set fields onto the receiver. Options merges key-wise,
-// so an overlay can set one provider option without dropping the rest. A zero
-// size in src leaves the receiver's value, so an overlay file cannot lift a
-// bound back to unbounded; the environment override can.
+// Merge overlays src's set fields onto the receiver. Options merges key-wise
+// into a copy, so an overlay can set one provider option without dropping the
+// rest or writing to a map the caller shares. A zero size in src leaves the
+// receiver's value, so an overlay file cannot lift a bound back to unbounded;
+// the environment override can.
 func (c *Config) Merge(src *Config) {
 	if src.Endpoint != "" {
 		c.Endpoint = src.Endpoint
@@ -91,11 +84,12 @@ func (c *Config) Merge(src *Config) {
 		c.RequestTimeout = src.RequestTimeout
 	}
 
-	for k, v := range src.Options {
+	if len(src.Options) > 0 {
+		c.Options = maps.Clone(c.Options)
 		if c.Options == nil {
 			c.Options = make(map[string]string, len(src.Options))
 		}
-		c.Options[k] = v
+		maps.Copy(c.Options, src.Options)
 	}
 }
 
@@ -149,14 +143,10 @@ func (c *Config) applyEnv() error {
 	return config.SetDurationFromEnv(&c.RequestTimeout, c.Env.RequestTimeout)
 }
 
-// applyOptionsEnv sets provider options from the environment. Each variable
-// named Env.Options_<KEY> sets the option whose key is the lower-cased KEY,
-// replacing the configured value. KEY must consist of upper-case letters,
-// digits, and underscores, so each option has exactly one variable;
-// applyOptionsEnv ignores a name in any other form and an empty value. It
-// copies the map before the first write, so an override never reaches a map
-// the caller shares. The provider parses the value, so a malformed value
-// fails when the provider is constructed, not here.
+// applyOptionsEnv sets provider options from the variables under the
+// Env.Options prefix, as [Env] describes. It ignores a name whose suffix is
+// not a valid option key and an empty value, and copies the map before the
+// first write.
 func (c *Config) applyOptionsEnv() {
 	if c.Env.Options == "" {
 		return
@@ -197,24 +187,28 @@ func optionKey(key string) bool {
 	return true
 }
 
-// finalized reports whether Finalize ran. RequestTimeout is the one pointer
-// Finalize defaults, so its presence is the evidence.
-func (c *Config) finalized() bool {
+// Finalized reports whether Finalize has run on c. [New] and a provider's
+// constructor check it to catch a wiring defect.
+func (c *Config) Finalized() bool {
+	// RequestTimeout is the one pointer Finalize defaults, so its presence is
+	// the evidence.
 	return c.RequestTimeout != nil
 }
 
+// validate checks the finalized values. Every error has the form
+// "storage: <field> <problem>".
 func (c *Config) validate() error {
 	if c.Container == "" {
-		return errors.New("storage container required")
+		return errors.New("storage: container is required")
 	}
 	if c.MaxObjectSize < 0 {
-		return fmt.Errorf("invalid max_object_size: %d", c.MaxObjectSize)
+		return fmt.Errorf("storage: max_object_size must not be negative, got %d", c.MaxObjectSize)
 	}
 	if c.ListPageSize < 0 {
-		return fmt.Errorf("invalid list_page_size: %d", c.ListPageSize)
+		return fmt.Errorf("storage: list_page_size must not be negative, got %d", c.ListPageSize)
 	}
 	if *c.RequestTimeout <= 0 {
-		return fmt.Errorf("request_timeout must be positive, got %s", c.RequestTimeout)
+		return fmt.Errorf("storage: request_timeout must be positive, got %s", c.RequestTimeout)
 	}
 	return nil
 }

@@ -281,6 +281,63 @@ func TestFake_ListDefaultPageSize(t *testing.T) {
 	}
 }
 
+func TestFake_WithPageSizeIgnoresNonPositive(t *testing.T) {
+	for _, n := range []int{0, -1} {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			f := storagetest.NewFake(storagetest.WithPageSize(n))
+			for _, key := range []string{"k1", "k2", "k3", "k4"} {
+				putString(t, f, key, key)
+			}
+			page, err := f.List(context.Background(), storage.ListOptions{})
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			if len(page.Objects) != 3 || page.Next == "" {
+				t.Errorf("List = %d objects, Next %q; want the default page of 3 and a Next", len(page.Objects), page.Next)
+			}
+		})
+	}
+}
+
+func TestFake_PutDefaultsContentType(t *testing.T) {
+	f := storagetest.NewFake()
+
+	obj := putString(t, f, "k", "v")
+	if obj.ContentType != "application/octet-stream" {
+		t.Errorf("Put ContentType = %q, want application/octet-stream", obj.ContentType)
+	}
+	if stat, err := f.Stat(context.Background(), "k"); err != nil || stat.ContentType != "application/octet-stream" {
+		t.Errorf("Stat = %+v, %v; want ContentType application/octet-stream", stat, err)
+	}
+}
+
+// Put reads its body and records the call before it reports an outage or a
+// missing container, as a provider learns the outcome only after it sends.
+func TestFake_PutRecordsBeforeFailing(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*storagetest.Fake)
+		want  error
+	}{
+		{"down", func(f *storagetest.Fake) { f.SetDown(true) }, storage.ErrUnavailable},
+		{"no container", (*storagetest.Fake).DropContainer, storage.ErrContainerNotFound},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := storagetest.NewFake()
+			tc.setup(f)
+			opts := storage.PutOptions{ContentType: "text/plain", Size: 3}
+
+			if _, err := f.Put(context.Background(), "k", strings.NewReader("abc"), opts); !errors.Is(err, tc.want) {
+				t.Fatalf("Put = %v, want %v", err, tc.want)
+			}
+			if gotOpts, consumed := f.LastPut(); gotOpts != opts || consumed != 3 {
+				t.Errorf("LastPut() = %+v, %d; want %+v, 3", gotOpts, consumed, opts)
+			}
+		})
+	}
+}
+
 func TestFake_OutageToggle(t *testing.T) {
 	f := storagetest.NewFake()
 	ctx := context.Background()
@@ -311,7 +368,7 @@ func TestFake_OutageToggle(t *testing.T) {
 		{"Probe", func() error { return f.Probe(ctx) }},
 	}
 
-	f.Down.Store(true)
+	f.SetDown(true)
 	for _, op := range ops {
 		err := op.call()
 		if !errors.Is(err, storage.ErrUnavailable) {
@@ -322,7 +379,7 @@ func TestFake_OutageToggle(t *testing.T) {
 		}
 	}
 
-	f.Down.Store(false)
+	f.SetDown(false)
 	for _, op := range ops {
 		if err := op.call(); err != nil {
 			t.Errorf("%s after the outage = %v, want nil", op.name, err)

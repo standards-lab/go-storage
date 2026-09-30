@@ -8,8 +8,8 @@ import (
 func TestValidateKey(t *testing.T) {
 	// A 1,024-rune key of two-byte runes is 2,048 bytes, so a byte count
 	// would reject it.
-	longest := strings.Repeat("é", MaxKeyLength)
-	mostSegments := strings.Repeat("a/", MaxKeySegments-1) + "a"
+	longest := strings.Repeat("é", maxKeyLength)
+	mostSegments := strings.Repeat("a/", maxKeySegments-1) + "a"
 
 	valid := []struct{ name, key string }{
 		{"storagetest prefix form", "storagetest/0123abcdef/x.txt"},
@@ -53,6 +53,33 @@ func TestValidateKey(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("validateKey(%q) = %q, want it to contain %q", tc.key, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateContainer(t *testing.T) {
+	for _, name := range []string{"abc", "unit", "acceptance-0123abcd", "a1-b2-c3", strings.Repeat("a", 63)} {
+		if err := validateContainer(name); err != nil {
+			t.Errorf("validateContainer(%q) = %v, want nil", name, err)
+		}
+	}
+
+	invalid := []struct{ name, container, want string }{
+		{"too short", "ab", "2 characters"},
+		{"too long", strings.Repeat("a", 64), "64 characters"},
+		{"upper case", "Assets", `has 'A'`},
+		{"underscore", "my_files", `has '_'`},
+		{"dot", "my.files", `has '.'`},
+		{"leading hyphen", "-files", "hyphen"},
+		{"trailing hyphen", "files-", "hyphen"},
+		{"double hyphen", "my--files", "hyphen"},
+	}
+	for _, tc := range invalid {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateContainer(tc.container)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("validateContainer(%q) = %v, want an error containing %q", tc.container, err, tc.want)
 			}
 		})
 	}

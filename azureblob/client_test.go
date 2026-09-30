@@ -64,6 +64,28 @@ func TestNew_RejectsBadMaxRetries(t *testing.T) {
 	}
 }
 
+func TestNew_RejectsBadTryTimeout(t *testing.T) {
+	for _, v := range []string{"x", "10", "0s", "-1s", ""} {
+		t.Run(v, func(t *testing.T) {
+			cfg := testConfig(t, "http://127.0.0.1:10000/"+testAccount, map[string]string{"try_timeout": v})
+			_, err := azureblob.New(cfg)
+			if err == nil || !strings.Contains(err.Error(), "try_timeout") {
+				t.Fatalf("New = %v, want an error naming try_timeout", err)
+			}
+		})
+	}
+}
+
+// A container name the service would refuse fails New rather than Start.
+func TestNew_RejectsBadContainerName(t *testing.T) {
+	cfg := testConfig(t, "http://127.0.0.1:10000/"+testAccount, nil)
+	cfg.Container = "My_Files"
+	_, err := azureblob.New(cfg)
+	if err == nil || !strings.Contains(err.Error(), "container name") {
+		t.Fatalf("New = %v, want an error naming the container name", err)
+	}
+}
+
 func TestNew_RejectsBadKey(t *testing.T) {
 	cfg := testConfig(t, "http://127.0.0.1:10000/"+testAccount, nil)
 	cfg.Key = "not base64!"
@@ -205,6 +227,24 @@ func TestMaxRetries_BoundsTheSDKRetryCount(t *testing.T) {
 	}
 }
 
+// try_timeout bounds each try, so a request the service never answers fails
+// as unavailable even under a caller's context with no deadline.
+func TestTryTimeout_BoundsAStalledRequest(t *testing.T) {
+	svc := newService(t, func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	})
+	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "100ms"}))
+
+	start := time.Now()
+	err := c.Probe(t.Context())
+	if !errors.Is(err, storage.ErrUnavailable) {
+		t.Fatalf("Probe of a stalled service = %v, want ErrUnavailable", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("Probe took %v, want it cut off near the 100ms try timeout", elapsed)
+	}
+}
+
 func TestProbe_ConnectionRefused(t *testing.T) {
 	c := newClient(t, testConfig(t, closedEndpoint(t), nil))
 
@@ -261,8 +301,8 @@ func TestCapabilities(t *testing.T) {
 	c := newClient(t, testConfig(t, "http://127.0.0.1:10000/"+testAccount, nil))
 
 	caps := c.Capabilities()
-	if caps.MaxKeyLength != azureblob.MaxKeyLength {
-		t.Errorf("MaxKeyLength = %d, want %d", caps.MaxKeyLength, azureblob.MaxKeyLength)
+	if caps.MaxKeyLength != 1024 {
+		t.Errorf("MaxKeyLength = %d, want 1024", caps.MaxKeyLength)
 	}
 	if caps.ValidateKey == nil {
 		t.Fatal("ValidateKey is nil")

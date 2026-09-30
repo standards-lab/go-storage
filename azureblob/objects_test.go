@@ -112,7 +112,9 @@ func TestPut_SendsBodyAndContentType(t *testing.T) {
 	}
 }
 
-func TestPut_NoContentTypeSendsNoHeader(t *testing.T) {
+// A Put without a ContentType sends and reports application/octet-stream,
+// the type the service would store anyway.
+func TestPut_NoContentTypeSendsOctetStream(t *testing.T) {
 	svc := newService(t, blobStored(testETag, testLastModified))
 	c := newClient(t, testConfig(t, svc.endpoint(), nil))
 
@@ -120,9 +122,9 @@ func TestPut_NoContentTypeSendsNoHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Put = %v, want nil", err)
 	}
-	wantObject(t, "Put", obj, "k", 5, "")
-	if _, ok := svc.Requests()[0].Header["X-Ms-Blob-Content-Type"]; ok {
-		t.Error("x-ms-blob-content-type was sent for a Put without a ContentType")
+	wantObject(t, "Put", obj, "k", 5, "application/octet-stream")
+	if got := svc.Requests()[0].Header.Get("x-ms-blob-content-type"); got != "application/octet-stream" {
+		t.Errorf("x-ms-blob-content-type = %q, want application/octet-stream", got)
 	}
 }
 
@@ -136,7 +138,7 @@ func TestPut_NonSeekableBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Put = %v, want nil", err)
 	}
-	wantObject(t, "Put", obj, "k", int64(len(content)), "")
+	wantObject(t, "Put", obj, "k", int64(len(content)), "application/octet-stream")
 	if reqs := svc.Requests(); len(reqs) != 1 || !bytes.Equal(reqs[0].Body, content) {
 		t.Fatalf("service saw %d requests, want one carrying the whole body", len(reqs))
 	}
@@ -306,7 +308,7 @@ func TestPut_DeclaredSize(t *testing.T) {
 					if err != nil {
 						t.Fatalf("Put = %v, want nil", err)
 					}
-					wantObject(t, "Put", obj, "k", int64(shape.length), "")
+					wantObject(t, "Put", obj, "k", int64(shape.length), "application/octet-stream")
 					wantCommit(t, svc.Requests(), shape.blocks)
 					return
 				}

@@ -5,44 +5,35 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
-// Store wraps a provider's Client with lifecycle integration and the limits
-// from Config. Construction performs no I/O, Start ensures the container
-// exists and establishes connectivity, and Ready reports connectivity live.
-// Start and Shutdown carry the lifecycle hook signature, so the composition
-// root registers the bare method values, and Ready satisfies
-// lifecycle.ReadinessChecker structurally; the package registers no hooks of
-// its own.
-//
-// Store implements Client. Every object operation returns [ErrNotReady]
-// before a successful Start or after Shutdown and otherwise delegates to the
-// provider under the caller's context. Store applies no timeout of its own to
-// an object operation; the caller's context and the provider's transport
-// govern. The configured RequestTimeout bounds only the calls Start and Ready
-// make on their own behalf.
-//
-// A Store is safe for concurrent use.
+// Store wraps a provider's [Client] with the lifecycle and the limits from
+// [Config]; every object operation returns [ErrNotReady] outside a successful
+// Start and Shutdown. A Store is safe for concurrent use.
 type Store struct {
 	client         Client
 	container      string
 	maxObjectSize  int64
 	listPageSize   int
 	requestTimeout time.Duration
-	started        atomic.Bool
-	closed         atomic.Bool
+
+	// started gates the object operations. mu serializes the transitions
+	// Start and Shutdown make, and shut records that Shutdown has run.
+	started atomic.Bool
+	mu      sync.Mutex
+	shut    bool
 }
 
-// New wraps c with cfg's limits. It panics on a nil c or a cfg that was not
-// finalized: each is a wiring defect at the composition root, not a runtime
-// condition. New copies what it needs out of cfg and does not retain it.
+// New wraps c with cfg's limits. It performs no I/O, and it panics on a nil c
+// or a cfg that was not finalized.
 func New(c Client, cfg Config) *Store {
 	if c == nil {
 		panic("storage: nil client")
 	}
-	if !cfg.finalized() {
+	if !cfg.Finalized() {
 		panic("storage: Config not finalized: call Finalize before New")
 	}
 	return &Store{
@@ -55,54 +46,70 @@ func New(c Client, cfg Config) *Store {
 }
 
 // Start ensures the configured container exists, then probes the provider,
-// both under one context bounded by the configured RequestTimeout, and marks
-// the store started. A failure of either step matches [ErrUnavailable] and
-// keeps the provider's error matchable, and the store stays not started.
-// There is no started guard: a repeat Start ensures and probes again.
+// both under one context bounded by RequestTimeout, and marks the store
+// started. A failure matches [ErrUnavailable] with the provider's error kept,
+// except that the caller's own cancellation is returned as it is. Start after
+// Shutdown, one that lands during Start's probe included, returns
+// [ErrNotReady].
 func (s *Store) Start(ctx context.Context) error {
+	if s.isShut() {
+		return ErrNotReady
+	}
 	startCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
 	defer cancel()
 	if err := s.client.EnsureContainer(startCtx); err != nil {
-		return unavailable(err)
+		return startFailure(ctx, err)
 	}
 	if err := s.client.Probe(startCtx); err != nil {
-		return unavailable(err)
+		return startFailure(ctx, err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shut {
+		return ErrNotReady
 	}
 	s.started.Store(true)
 	return nil
 }
 
-// unavailable classifies a Start failure under [ErrUnavailable]. An error the
-// provider already classified passes through unchanged, so the sentinel is
-// never stacked twice.
-func unavailable(err error) error {
-	if errors.Is(err, ErrUnavailable) {
+func (s *Store) isShut() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.shut
+}
+
+// startFailure classifies a Start failure under [ErrUnavailable]. The
+// caller's cancellation and an error the provider already classified pass
+// through unchanged.
+func startFailure(ctx context.Context, err error) error {
+	if ctx.Err() != nil || errors.Is(err, ErrUnavailable) {
 		return err
 	}
 	return fmt.Errorf("%w: %w", ErrUnavailable, err)
 }
 
 // Shutdown clears readiness and, when the Client implements io.Closer,
-// closes it. The Client is closed at most once across every Shutdown call;
-// the first call returns the Close error and later calls return nil.
-// Shutdown is safe before Start and after a failed Start. The context exists
-// for the lifecycle hook signature.
-func (s *Store) Shutdown(ctx context.Context) error {
+// closes it. The first call returns the Close error and later calls return
+// nil. Shutdown is safe before Start and after a failed Start.
+func (s *Store) Shutdown(context.Context) error {
+	s.mu.Lock()
+	already := s.shut
+	s.shut = true
 	s.started.Store(false)
-	closer, ok := s.client.(io.Closer)
-	if !ok {
+	s.mu.Unlock()
+
+	if already {
 		return nil
 	}
-	if !s.closed.CompareAndSwap(false, true) {
-		return nil
+	if closer, ok := s.client.(io.Closer); ok {
+		return closer.Close()
 	}
-	return closer.Close()
+	return nil
 }
 
-// Ready reports live connectivity: false before Start or after Shutdown, and
-// otherwise the result of a probe bounded by the configured RequestTimeout.
-// Readiness drops during an outage and recovers when the provider does, at
-// the cost of one bounded round trip per call.
+// Ready reports live connectivity: false outside a successful Start and
+// Shutdown, and otherwise the result of a probe bounded by RequestTimeout.
 func (s *Store) Ready() bool {
 	if !s.started.Load() {
 		return false
@@ -112,44 +119,39 @@ func (s *Store) Ready() bool {
 	return s.client.Probe(ctx) == nil
 }
 
-// Put writes body as the object at key after enforcing the configured
-// MaxObjectSize and the declared opts.Size. A declared Size over the bound is
-// rejected with [ErrTooLarge] before the provider sees the body. Otherwise
-// the body is read through a bound, whether or not a size was declared,
-// because a declared size is the caller's claim and the bound exists for
-// untrusted bodies. A body that runs past the bound fails with [ErrTooLarge],
-// wrapped around the provider's error when it returned one.
-//
-// A declared Size greater than 0 is enforced on the body too, whether or not
-// a bound is configured: a body that ends short of Size fails with an error
-// wrapping io.ErrUnexpectedEOF, and one that runs past Size fails on the
-// first byte beyond it. Either error names the declared size and reaches the
-// provider as a read failure before the body ends, so the provider commits
-// nothing. The bound is the inner reader, so when both would trip on the
-// same byte, which happens only when Size equals the bound, the body fails
-// with [ErrTooLarge]. A body past a Size that is smaller than the bound fails
-// on the size check first, since that check needs fewer bytes to decide.
-//
-// Store cannot undo a commit, so it relies on the provider's Put being all or
-// nothing, which the storagetest suite proves for each provider. When the
-// provider nonetheless reports success after the body failed one of these
-// checks, Put returns the check's error rather than the Object.
+// Put writes body at key after checking key with the provider's ValidateKey.
+// A declared opts.Size or a body over MaxObjectSize fails with [ErrTooLarge];
+// a body shorter or longer than a declared Size fails with an error (short
+// wraps io.ErrUnexpectedEOF). Both checks fail the body's read, so the
+// provider commits nothing. A negative Size is an error the provider never
+// sees.
 func (s *Store) Put(ctx context.Context, key string, body io.Reader, opts PutOptions) (Object, error) {
 	if !s.started.Load() {
 		return Object{}, ErrNotReady
+	}
+	if validate := s.client.Capabilities().ValidateKey; validate != nil {
+		if err := validate(key); err != nil {
+			return Object{}, err
+		}
+	}
+	if opts.Size < 0 {
+		return Object{}, fmt.Errorf("invalid put size: %d", opts.Size)
 	}
 	if s.maxObjectSize > 0 && opts.Size > s.maxObjectSize {
 		return Object{}, fmt.Errorf("%w: declared size %d exceeds the configured max object size (%d bytes)", ErrTooLarge, opts.Size, s.maxObjectSize)
 	}
 
-	var bounded *boundedReader
+	// The bound is the inner reader, so a body past a Size equal to the
+	// bound reports ErrTooLarge.
+	var bounded, sized *limitReader
 	if s.maxObjectSize > 0 {
-		bounded = newBoundedReader(body, s.maxObjectSize)
+		bounded = newLimitReader(body, s.maxObjectSize, false,
+			fmt.Errorf("body exceeds the configured max object size (%d bytes)", s.maxObjectSize))
 		body = bounded
 	}
-	var sized *sizedReader
 	if opts.Size > 0 {
-		sized = newSizedReader(body, opts.Size)
+		sized = newLimitReader(body, opts.Size, true,
+			fmt.Errorf("body is longer than the declared size (%d bytes)", opts.Size))
 		body = sized
 	}
 
@@ -163,10 +165,8 @@ func (s *Store) Put(ctx context.Context, key string, body io.Reader, opts PutOpt
 	return obj, err
 }
 
-// readFailure combines the error a body wrapper recorded with what the
-// provider returned: the recorded error alone when the provider reported
-// success or already wrapped it, and both otherwise, so the provider's cause
-// stays matchable.
+// readFailure combines the error a limitReader recorded with what the
+// provider returned, so the provider's cause stays matchable.
 func readFailure(recorded, provider error) error {
 	switch {
 	case provider == nil:
@@ -205,8 +205,8 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 }
 
 // List returns one page of objects selected by opts. A Limit of 0 takes the
-// configured ListPageSize when one is set; an explicit positive Limit passes
-// through unchanged. A negative Limit is an error the provider never sees.
+// configured ListPageSize; a negative Limit is an error the provider never
+// sees.
 func (s *Store) List(ctx context.Context, opts ListOptions) (Page, error) {
 	if !s.started.Load() {
 		return Page{}, ErrNotReady
@@ -220,17 +220,15 @@ func (s *Store) List(ctx context.Context, opts ListOptions) (Page, error) {
 	return s.client.List(ctx, opts)
 }
 
-// EnsureContainer creates the configured container and succeeds when it
-// already exists, under the caller's context. It has no readiness check: a
-// missing container is what it corrects, so it works before Start, after
-// Shutdown, and while Ready reports false. The provider's error is returned
-// unchanged.
+// EnsureContainer delegates to the provider under the caller's context with
+// no readiness check, so it recovers a container deleted while the process
+// runs.
 func (s *Store) EnsureContainer(ctx context.Context) error {
 	return s.client.EnsureContainer(ctx)
 }
 
 // Probe reports whether the provider is reachable, under the caller's
-// context. It returns [ErrNotReady] before Start or after Shutdown.
+// context.
 func (s *Store) Probe(ctx context.Context) error {
 	if !s.started.Load() {
 		return ErrNotReady
@@ -238,109 +236,64 @@ func (s *Store) Probe(ctx context.Context) error {
 	return s.client.Probe(ctx)
 }
 
-// Capabilities returns the provider's key constraints. They are a static
-// fact about the provider, so the call needs no readiness check.
+// Capabilities returns the provider's key constraints, with no readiness
+// check.
 func (s *Store) Capabilities() Capabilities {
 	return s.client.Capabilities()
 }
 
-// Container returns the configured container name, copied from Config at
-// New.
+// Container returns the configured container name.
 func (s *Store) Container() string {
 	return s.container
 }
 
-// boundedReader lets exactly remain bytes through and fails on the first byte
-// beyond them. It differs from io.LimitedReader, which reports io.EOF at the
-// limit and so would make an oversize body look like a complete short one.
-// err is the read error it returns once the body runs past the bound, and
-// Put wraps it under [ErrTooLarge]. tripped is atomic so Put can read it after
-// the provider returns even if the provider's reads ran on another goroutine.
-type boundedReader struct {
+// limitReader lets limit bytes through and fails on the first byte past
+// them with long. When exact is set, an io.EOF before limit bytes fails too,
+// with an error wrapping io.ErrUnexpectedEOF. A failure is repeated on every
+// later Read, and tripped is atomic so Put can read it after the provider
+// returns.
+type limitReader struct {
 	r       io.Reader
-	remain  int64
-	err     error
-	tripped atomic.Bool
-}
-
-func newBoundedReader(r io.Reader, bound int64) *boundedReader {
-	return &boundedReader{
-		r:      r,
-		remain: bound,
-		err:    fmt.Errorf("body exceeds the configured max object size (%d bytes)", bound),
-	}
-}
-
-func (b *boundedReader) Read(p []byte) (int, error) {
-	if b.tripped.Load() {
-		return 0, b.err
-	}
-	if b.remain <= 0 {
-		// The bound is spent. One more byte from the source means the body
-		// is oversize; none means it ended exactly at the bound.
-		var probe [1]byte
-		n, err := b.r.Read(probe[:])
-		if n > 0 {
-			b.tripped.Store(true)
-			return 0, b.err
-		}
-		return 0, err
-	}
-	if int64(len(p)) > b.remain {
-		p = p[:b.remain]
-	}
-	n, err := b.r.Read(p)
-	b.remain -= int64(n)
-	return n, err
-}
-
-// sizedReader holds a body to its declared size: it lets exactly size bytes
-// through, fails on the first byte beyond them, and turns an io.EOF before
-// size bytes into an error wrapping io.ErrUnexpectedEOF. Either failure is
-// recorded in err and reported on every later Read, so a provider that reads
-// again after the failure sees it again. tripped is atomic for the same
-// reason as boundedReader's.
-type sizedReader struct {
-	r       io.Reader
-	size    int64
+	limit   int64
 	read    int64
+	exact   bool
+	long    error
 	err     error
 	tripped atomic.Bool
 }
 
-func newSizedReader(r io.Reader, size int64) *sizedReader {
-	return &sizedReader{r: r, size: size}
+func newLimitReader(r io.Reader, limit int64, exact bool, long error) *limitReader {
+	return &limitReader{r: r, limit: limit, exact: exact, long: long}
 }
 
-func (s *sizedReader) Read(p []byte) (int, error) {
-	if s.tripped.Load() {
-		return 0, s.err
+func (l *limitReader) Read(p []byte) (int, error) {
+	if l.tripped.Load() {
+		return 0, l.err
 	}
-	remain := s.size - s.read
+	remain := l.limit - l.read
 	if remain <= 0 {
-		// The declared size is spent. One more byte from the source means
-		// the body is longer than declared; none means it ended on it.
+		// One more byte from the source means the body runs past the limit.
 		var probe [1]byte
-		n, err := s.r.Read(probe[:])
+		n, err := l.r.Read(probe[:])
 		if n > 0 {
-			return 0, s.trip(fmt.Errorf("body is longer than the declared size (%d bytes)", s.size))
+			return 0, l.trip(l.long)
 		}
 		return 0, err
 	}
 	if int64(len(p)) > remain {
 		p = p[:remain]
 	}
-	n, err := s.r.Read(p)
-	s.read += int64(n)
-	if errors.Is(err, io.EOF) && s.read < s.size {
-		return n, s.trip(fmt.Errorf("body ended after %d bytes, short of the declared size (%d bytes): %w", s.read, s.size, io.ErrUnexpectedEOF))
+	n, err := l.r.Read(p)
+	l.read += int64(n)
+	if l.exact && errors.Is(err, io.EOF) && l.read < l.limit {
+		return n, l.trip(fmt.Errorf("body ended after %d bytes, short of the declared size (%d bytes): %w", l.read, l.limit, io.ErrUnexpectedEOF))
 	}
 	return n, err
 }
 
 // trip records err as the failure every later Read reports and returns it.
-func (s *sizedReader) trip(err error) error {
-	s.err = err
-	s.tripped.Store(true)
+func (l *limitReader) trip(err error) error {
+	l.err = err
+	l.tripped.Store(true)
 	return err
 }

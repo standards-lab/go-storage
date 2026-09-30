@@ -35,8 +35,8 @@ the standard's principles it enhances are stated below. Its repository-level pri
 
 - `storage` (the base module's root package) — `Client`, the standard-tier interface, with
   `Capabilities` and the error sentinels; `Config`, on go-core's Merge-and-Finalize contract;
-  and `Store`, the lifecycle wrapper that implements `Client` and enforces the size bound and a
-  declared body size.
+  and `Store`, the lifecycle wrapper that implements `Client` and enforces the provider's key
+  rules, the size bound, and a declared body size.
 - `storagetest` (a package of the base module) — an in-memory `Fake` client for hermetic tests
   and `Run` and `RunMissingContainer`, the conformance checks a provider runs against its own
   `Client`.
@@ -53,8 +53,8 @@ mise run test    # test every module
 ```
 
 The unit tests need no service. `azureblob`'s acceptance tests run the conformance suite against
-a real service when `AZUREBLOB_TEST_ENDPOINT` is set; the package documentation of `azureblob`
-shows how to start Azurite for them.
+a real service when `AZUREBLOB_TEST_ENDPOINT` is set; CI runs them against Azurite, and the
+package documentation of `azureblob` shows how to start it locally.
 
 ## License
 

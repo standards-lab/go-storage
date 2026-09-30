@@ -7,6 +7,41 @@ only; each provider sub-module keeps its own.
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-09-30
+
+### Added
+
+- `Config.Finalized` reports whether `Finalize` has run, so a provider's constructor can detect an
+  unfinalized configuration without relying on the base module's private rule.
+- `storagetest.Fake.SetDown` starts or ends the Fake's outage.
+
+### Changed
+
+- **Breaking:** `Store.Shutdown` is terminal. `Start` after `Shutdown` returns `ErrNotReady` without
+  calling the provider, and a `Shutdown` that lands while `Start` is probing leaves the store not
+  started, with `Start` returning `ErrNotReady`.
+- **Breaking:** `Store.Put` checks the key with the provider's `Capabilities().ValidateKey` before
+  the provider sees it, and returns that error, and it rejects a negative `PutOptions.Size`.
+- **Breaking:** a `Put` without a `ContentType` stores and reports `application/octet-stream`.
+  `storagetest.Fake` does, and the conformance suite checks the `ContentType` of every `Put`,
+  `Get`, and `Stat` it makes.
+- **Breaking:** `storagetest.Fake`'s exported `Down` field is replaced by `SetDown`.
+- The conformance suite fails a missing key whose error also matches `ErrContainerNotFound` or
+  `ErrUnavailable`.
+- Every `Config` validation error has the form `storage: <field> <problem>`.
+- The package documentation states each contract fact once, beside the symbol it governs.
+
+### Fixed
+
+- `Store.Start` returns the caller's own cancellation as it is instead of classifying it as
+  `ErrUnavailable`.
+- `Config.Merge` copies `Options` before writing, so an overlay never reaches a map the caller
+  shares.
+- `storagetest.WithPageSize` with 0 or less keeps the default page size, where `Fake.List`
+  panicked.
+- `storagetest.Fake.Put` reads the body and records the call before it reports an outage or a
+  missing container, as its documentation states.
+
 ## [v0.2.1] - 2026-09-29
 
 ### Added
@@ -83,7 +118,8 @@ only; each provider sub-module keeps its own.
   entity-tag form and equal across `Put`, `Get`, `Stat`, and `List`. `Fake` enforces `Size`
   and reports a quoted ETag.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.3.0...HEAD
+[v0.3.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.3.0
 [v0.2.1]: https://github.com/standards-lab/go-storage/releases/tag/v0.2.1
 [v0.2.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.1.0

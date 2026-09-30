@@ -8,6 +8,33 @@ sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-09-30
+
+### Added
+
+- The `try_timeout` option sets a deadline on each try of a request, as a Go duration, through
+  the SDK's `RetryOptions.TryTimeout`, so a stalled service cannot hold a call indefinitely. It
+  covers the reading of a `Get` body and the upload of each `Put` block. Unset keeps the SDK
+  default, no deadline.
+
+### Changed
+
+- The `go-storage` requirement is v0.3.0. v0.2.0 of this module required go-storage v0.2.0 while
+  documenting the option overrides go-storage v0.2.1 added.
+- **Breaking:** `New` rejects a container name the service would refuse (3 to 63 lowercase
+  letters, digits, and single hyphens, starting and ending with a letter or digit), where
+  `Store.Start` used to fail with `storage.ErrUnavailable`.
+- **Breaking:** a `Put` without a `ContentType` sends and reports `application/octet-stream`, the
+  type the service stores, where it reported an empty `ContentType`.
+- `New` detects an unfinalized configuration through `storage.Config.Finalized`.
+- CI runs the acceptance tests against Azurite.
+
+### Removed
+
+- **Breaking:** the exported constants `MaxKeyLength`, `MaxKeySegments`, `DefaultBlockSize`, and
+  `DefaultConcurrency`. The package documentation states their values, and
+  `Client.Capabilities().MaxKeyLength` reports the key limit.
+
 ## [v0.2.0] - 2026-09-29
 
 ### Changed
@@ -61,6 +88,7 @@ sub-module only; the base module keeps its own.
   against a real service, gated on `AZUREBLOB_TEST_ENDPOINT` so they skip on the unit tier.
 - Requires `github.com/standards-lab/go-storage` v0.1.0.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/azureblob/v0.2.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/azureblob/v0.3.0...HEAD
+[v0.3.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.1.0

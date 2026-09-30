@@ -38,17 +38,9 @@ const maxPages = 100
 // the client it returns, so the container newClient's client is wired to may
 // not exist yet. Every key the suite writes sits under a random prefix of its
 // own, and every subtest deletes what it wrote when it ends, so the suite can
-// run against a shared container that holds other objects.
-//
-// The suite asserts the contract [storage.Client] documents and nothing a
-// provider is free to choose: List results are compared as sets, so listing
-// order is not asserted, and ModifiedAt is asserted non-zero and consistent
-// across Put, Get, and Stat, never close to the wall clock. Every ETag is
-// asserted to be in HTTP entity-tag form and identical across Put, Get,
-// Stat, and List for one version. Put is asserted all or nothing: a body
-// that fails partway and a PutOptions.Size that is shorter or longer than
-// the body each return an error, after which a fresh key is absent and an
-// existing key still holds its previous content and metadata.
+// run against a shared container that holds other objects. It asserts the
+// contract [storage.Client] documents and nothing a provider is free to
+// choose, such as listing order or a ModifiedAt near the wall clock.
 func Run(t *testing.T, newClient func(t *testing.T) storage.Client) {
 	t.Helper()
 	for _, tc := range cases {
@@ -65,9 +57,9 @@ func Run(t *testing.T, newClient func(t *testing.T) storage.Client) {
 // leaves nothing behind. A client whose Put succeeds anyway, as one that
 // creates its container on demand would, fails the check, and the object it
 // stored is deleted when the test ends.
+//
 // Probe and each object operation, Delete included, must fail with an error
-// matching ErrContainerNotFound: deleting a missing key succeeds, but deleting
-// into a missing container is a fault in the store.
+// matching ErrContainerNotFound.
 func RunMissingContainer(t *testing.T, newClient func(t *testing.T) storage.Client) {
 	t.Helper()
 	checkMissingContainer(t, newClient(t))
@@ -244,9 +236,7 @@ func stat(t testing.TB, c storage.Client, key string) storage.Object {
 
 // wantObject asserts got describes key with the given size and content type,
 // carries a non-empty ETag and a non-zero ModifiedAt, and agrees with want on
-// the ETag and ModifiedAt. what names the call that produced got. An empty
-// contentType skips the ContentType check: a provider may apply a default of
-// its own to an object stored without one, and Put has no way to report it.
+// the ETag and ModifiedAt. what names the call that produced got.
 func wantObject(t testing.TB, what string, got, want storage.Object, key string, size int64, contentType string) {
 	t.Helper()
 	if got.Key != key {
@@ -255,7 +245,7 @@ func wantObject(t testing.TB, what string, got, want storage.Object, key string,
 	if got.Size != size {
 		t.Errorf("%s Size = %d, want %d", what, got.Size, size)
 	}
-	if contentType != "" && got.ContentType != contentType {
+	if got.ContentType != contentType {
 		t.Errorf("%s ContentType = %q, want %q", what, got.ContentType, contentType)
 	}
 	if got.ETag == "" {
@@ -273,8 +263,7 @@ func wantObject(t testing.TB, what string, got, want storage.Object, key string,
 }
 
 // wantContent asserts Get and Stat of key agree with put on the content and
-// the metadata. An empty contentType skips the ContentType check, as in
-// wantObject.
+// the metadata.
 func wantContent(t testing.TB, c storage.Client, key string, put storage.Object, content []byte, contentType string) {
 	t.Helper()
 	size := int64(len(content))
@@ -304,11 +293,17 @@ func firstDifference(got, want []byte) string {
 	return ""
 }
 
-// wantNotFound asserts err matches storage.ErrNotFound.
+// wantNotFound asserts err matches storage.ErrNotFound and neither
+// storage.ErrContainerNotFound nor storage.ErrUnavailable.
 func wantNotFound(t testing.TB, what string, err error) {
 	t.Helper()
-	if !errors.Is(err, storage.ErrNotFound) {
+	switch {
+	case !errors.Is(err, storage.ErrNotFound):
 		t.Errorf("%s = %v, want ErrNotFound", what, err)
+	case errors.Is(err, storage.ErrContainerNotFound):
+		t.Errorf("%s = %v, want it not to match ErrContainerNotFound", what, err)
+	case errors.Is(err, storage.ErrUnavailable):
+		t.Errorf("%s = %v, want it not to match ErrUnavailable", what, err)
 	}
 }
 
@@ -388,15 +383,7 @@ func (r readOnly) Read(p []byte) (int, error) { return r.r.Read(p) }
 // content.
 func largeBody() []byte {
 	data := make([]byte, largeBodySize)
-	r := mathrand.New(mathrand.NewPCG(0x5701a6e7e57, 0xb0d1))
-	for i := 0; i < len(data); i += 8 {
-		v := r.Uint64()
-		for j := range 8 {
-			if i+j < len(data) {
-				data[i+j] = byte(v >> (8 * j))
-			}
-		}
-	}
+	_, _ = mathrand.NewChaCha8([32]byte{'s', 't', 'o', 'r', 'a', 'g', 'e'}).Read(data)
 	return data
 }
 
@@ -532,7 +519,7 @@ func checkPutDeclaredSize(t testing.TB, c storage.Client, prefix string) {
 	key := prefix + "declared"
 	content := []byte("a body whose length the caller declared")
 	obj := put(t, c, key, bytes.NewReader(content), storage.PutOptions{Size: int64(len(content))})
-	wantContent(t, c, key, obj, content, "")
+	wantContent(t, c, key, obj, content, "application/octet-stream")
 }
 
 func checkPutUnknownSize(t testing.TB, c storage.Client, prefix string) {
@@ -540,7 +527,7 @@ func checkPutUnknownSize(t testing.TB, c storage.Client, prefix string) {
 	key := prefix + "unknown"
 	content := []byte("a body whose length the caller did not declare")
 	obj := put(t, c, key, bytes.NewReader(content), storage.PutOptions{})
-	wantContent(t, c, key, obj, content, "")
+	wantContent(t, c, key, obj, content, "application/octet-stream")
 }
 
 func checkPutNonSeekableBody(t testing.TB, c storage.Client, prefix string) {
@@ -556,7 +543,7 @@ func checkPutOneByteReads(t testing.TB, c storage.Client, prefix string) {
 	key := prefix + "one-byte-reads"
 	content := []byte("delivered one byte per Read")
 	obj := put(t, c, key, iotest.OneByteReader(bytes.NewReader(content)), storage.PutOptions{})
-	wantContent(t, c, key, obj, content, "")
+	wantContent(t, c, key, obj, content, "application/octet-stream")
 }
 
 // wantAbsent asserts key holds no object: Stat matches ErrNotFound and a

@@ -14,8 +14,7 @@ type Object struct {
 	// Size is the object's length in bytes.
 	Size int64
 
-	// ContentType is the object's media type, carried as an HTTP header with
-	// identical semantics on every target API.
+	// ContentType is the object's media type.
 	ContentType string
 
 	// ETag is the provider's opaque version identifier for the object's
@@ -42,23 +41,16 @@ type Blob struct {
 
 // PutOptions carries what the caller knows about a Put body.
 type PutOptions struct {
-	// ContentType is the media type stored with the object.
+	// ContentType is the media type stored with the object. Empty stores
+	// application/octet-stream.
 	ContentType string
 
 	// Size is the body's length when known; 0 means unknown and asserts
-	// nothing. A provider that must know the length to sign its request
-	// buffers the body only when Size is 0.
-	//
-	// A Size greater than 0 must equal the number of bytes the body yields
-	// through EOF. A body that ends short of Size or runs past it is an
-	// error, and the Put stores nothing: a provider never truncates the body
-	// to Size and never stores the whole body regardless of Size.
+	// nothing. A Size greater than 0 is enforced as [Client.Put] describes.
 	Size int64
 }
 
-// GetOptions is reserved for options on Get. It is empty on purpose: a byte
-// range is the anticipated first field, and the parameter exists now so
-// adding it later changes no signature.
+// GetOptions is reserved for options on Get, such as a byte range.
 type GetOptions struct{}
 
 // ListOptions selects which objects a List call returns.
@@ -86,12 +78,7 @@ type Page struct {
 	Next string
 }
 
-// Capabilities states what a provider's target API requires of a key, and
-// has room for further per-provider facts as they earn a place here. Every
-// provider declares its key constraints, so a consumer never assumes them. A
-// consumer that builds keys from a variable segment calls ValidateKey, read
-// from Store.Capabilities, before Put. A key the provider would reject then
-// fails at construction instead of at the object store.
+// Capabilities states what a provider's target API requires of a key.
 type Capabilities struct {
 	// MaxKeyLength is the longest key the provider accepts.
 	MaxKeyLength int
@@ -118,9 +105,9 @@ type Client interface {
 	// and returns the stored object's metadata. Put is all or nothing: on
 	// success the object holds exactly the bytes body yielded through EOF,
 	// and on any error, a failure of body included, nothing is written at
-	// key and an object already stored there is unchanged. When opts.Size is
-	// greater than 0 it must equal the body's length, and a body that is
-	// shorter or longer is an error that stores nothing.
+	// key and an object already stored there is unchanged. An opts.Size
+	// greater than 0 must equal the body's length; a body that is shorter or
+	// longer is an error, and the provider never truncates it to Size.
 	Put(ctx context.Context, key string, body io.Reader, opts PutOptions) (Object, error)
 
 	// Get opens the object at key for reading. The caller closes the
@@ -138,14 +125,11 @@ type Client interface {
 	List(ctx context.Context, opts ListOptions) (Page, error)
 
 	// EnsureContainer creates the configured container and succeeds when it
-	// already exists. It is idempotent, and it never deletes or reconfigures
-	// an existing container. It is not an object operation. [Store] calls it
-	// from Start and EnsureContainer.
+	// already exists. It never deletes or reconfigures an existing container.
 	EnsureContainer(ctx context.Context) error
 
 	// Probe reports whether the configured credential and container are
-	// reachable. It is not an object operation. [Store] calls it from Start
-	// and Ready.
+	// reachable.
 	Probe(ctx context.Context) error
 
 	// Capabilities returns what the provider's target API requires of a
