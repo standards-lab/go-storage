@@ -54,11 +54,12 @@ func (c *Client) Put(ctx context.Context, key string, body io.Reader, opts stora
 }
 
 // Get opens the blob at key with one Get Blob request and returns a body
-// that resumes after a failed read, as the package documentation's
-// try_timeout entry describes. A read's failure is classified as every
-// other operation's is: a try's deadline or a lost connection is
-// storage.ErrUnavailable, and a blob deleted or replaced before a
-// resumption is storage.ErrNotFound, since the version being read is gone.
+// that resumes after a failed read, as the try_timeout entry in the
+// package documentation describes. The body classifies a read's failure
+// as every other operation's is classified: a try's deadline or a lost
+// connection is storage.ErrUnavailable, and a blob deleted or replaced
+// before a resumption is storage.ErrNotFound, since the version being
+// read is gone.
 func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (storage.Blob, error) {
 	resp, err := c.container.NewBlobClient(key).DownloadStream(ctx, nil)
 	if err != nil {
@@ -81,10 +82,11 @@ func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (sto
 	}, nil
 }
 
-// resuming is the body of a Get: with readRetries above zero, the SDK's
-// retry reader, which resumes a failed read from its offset with a ranged
-// GET conditioned on the ETag; with none, the response body itself, since
-// the retry reader reads a count below 1 as its default of 3.
+// resuming returns the body of a Get. With readRetries above zero it is
+// the SDK's retry reader, which resumes a failed read from its offset with
+// a ranged GET conditioned on the ETag. With none it is the response body
+// itself, since the retry reader treats a count below 1 as its default
+// of 3.
 func (c *Client) resuming(ctx context.Context, resp blob.DownloadStreamResponse) io.ReadCloser {
 	if c.readRetries == 0 {
 		return resp.Body
@@ -92,8 +94,8 @@ func (c *Client) resuming(ctx context.Context, resp blob.DownloadStreamResponse)
 	return resp.NewRetryReader(ctx, &blob.RetryReaderOptions{MaxRetries: c.readRetries})
 }
 
-// classifiedBody classifies a Get body's read failures as classify does
-// an operation's; io.EOF passes through.
+// classifiedBody classifies a Get body's read failures with classifyRead
+// and passes io.EOF through unchanged.
 type classifiedBody struct{ io.ReadCloser }
 
 func (b classifiedBody) Read(p []byte) (int, error) {

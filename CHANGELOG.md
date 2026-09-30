@@ -16,8 +16,8 @@ only; each provider sub-module keeps its own.
 
 ### Changed
 
-- `Store.Get` hands the provider a context of its own, which closing the body cancels, so a
-  provider sees its request released when the caller is done with the body.
+- `Store.Get` hands the provider a context derived from the caller's, which closing the body
+  cancels, so the provider's request ends when the caller is done with the body.
 
 ## [v0.3.0] - 2026-09-30
 

@@ -57,13 +57,13 @@ type Config struct {
 	RequestTimeout *config.Duration `json:"request_timeout"`
 
 	// ReadIdleTimeout bounds each read of a Get's body: a read that
-	// returns nothing within it fails with [ErrUnavailable], and the read's
+	// returns nothing within it fails with [ErrUnavailable], and the Get's
 	// request is cancelled, so a stalled store is cut off. The clock runs
 	// only while a read is in progress, so a caller that reads slowly, such
 	// as a download to a slow client, is never cut off, however long the
-	// whole transfer takes. It defaults to 30 seconds. A provider that
-	// retries within a read, as azureblob's try_timeout does, is sized
-	// below it.
+	// whole transfer takes. It defaults to 30 seconds. A provider's
+	// per-try deadline within a read, such as azureblob's try_timeout, is
+	// sized below it.
 	ReadIdleTimeout *config.Duration `json:"read_idle_timeout"`
 
 	Env Env `json:"-"`

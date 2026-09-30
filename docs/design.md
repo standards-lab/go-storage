@@ -74,18 +74,15 @@ needs managed identity. `MaxObjectSize` and `ListPageSize` have no default becau
 no policy numbers; 0 means unset, and pointer fields were rejected because an explicit zero means
 nothing different. `RequestTimeout` has a default because it bounds only the calls `Store` makes
 for itself; one timeout over every operation would cut off a large upload. `ReadIdleTimeout` has
-a default because it bounds only the store's side of a download: `Store` times each read of a
-`Get`'s body while the read is in progress, and cancels the request when the read waits past the
-limit. A caller that reads slowly spends its time between reads, which the clock never counts,
-so a slow client's download is never cut off, however long it runs. A per-request deadline on
-the object operations belongs to the provider's transport instead: `azureblob`'s `try_timeout`
-is that deadline, so a stalled store cannot hold a request indefinitely. It bounds each try of a
-`Put` or a metadata call, not the whole call with its retries, and each try of a `Get`'s body: a
-body whose try deadline passes mid-read resumes from its offset with a ranged request
-conditioned on the ETag (the SDK's retry reader), so `try_timeout` is sized for one operation
-while a download runs as long as its caller reads. `ReadIdleTimeout` bounds each read with its
-resumptions, so it is set above `try_timeout`: a try that stalls then resumes once before the
-store is cut off.
+a default because it bounds only the store's side of a download: the clock runs while a read of a
+`Get`'s body is in progress, never between reads, so a slow client's download is never cut off.
+A per-request deadline on the object operations belongs to the provider's transport instead:
+`azureblob`'s `try_timeout` is that deadline, so a stalled store cannot hold a request
+indefinitely. It bounds each try of a `Put`, a metadata call, or a `Get`'s body, not the whole
+call with its retries. The SDK's retry reader resumes a `Get`'s body past a try's deadline, so
+`try_timeout` is sized for one operation while a download runs as long as its caller reads.
+`ReadIdleTimeout` bounds each read including its resumptions, so it is set above `try_timeout`,
+which lets a stalled try resume once before the store cuts the read off.
 
 `azureblob`'s upload defaults trade memory for requests. A 4 MiB block is four times the SDK's
 1 MiB floor, so a multi-block body takes a quarter of the requests while the service's

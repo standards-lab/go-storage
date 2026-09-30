@@ -41,8 +41,8 @@ type Client struct {
 	container   *container.Client
 	blockSize   int64
 	concurrency int
-	// readRetries is how many times a Get's body resumes after a failed
-	// read: the retry count the SDK's policy applies to each request.
+	// readRetries is how many times per read a Get's body resumes after a
+	// failed read: the retry count the SDK's policy applies to each request.
 	readRetries int32
 }
 
@@ -114,10 +114,9 @@ func uploadOptions(options map[string]string) (blockSize int64, concurrency int,
 	return blockSize, concurrency, nil
 }
 
-// readRetries is the retry count the SDK's policy applies for the
-// configured MaxRetries, which a Get's body resumes as many times per
-// read: the policy's default of 3 when unset (zero), and none when
-// negative.
+// readRetries returns the retry count the SDK's policy applies for the
+// configured MaxRetries: the policy's default of 3 when MaxRetries is
+// unset (zero), none when it is negative, and MaxRetries otherwise.
 func readRetries(maxRetries int32) int32 {
 	switch {
 	case maxRetries == 0:

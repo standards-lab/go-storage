@@ -438,8 +438,8 @@ func TestGet_MapsHeadersAndBody(t *testing.T) {
 }
 
 // rangedBody serves content as the Blob service does, honoring the
-// x-ms-range a resumed read sends, and stalls after sending stallAt bytes
-// of the whole object on each request whose range starts before it, until
+// x-ms-range a resumed read sends. A request whose range starts before
+// offset stallAt stalls once it has sent the bytes up to stallAt, until
 // the try's deadline cancels the request.
 func rangedBody(content string, stallAt int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
