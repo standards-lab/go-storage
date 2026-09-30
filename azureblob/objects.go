@@ -73,7 +73,11 @@ func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (sto
 			ETag:        entityTag(resp.ETag),
 			ModifiedAt:  deref(resp.LastModified),
 		},
-		Body: resp.Body,
+		// A try's deadline covers the part of the body read within it: when
+		// a read fails, the body resumes from its offset with a ranged GET
+		// conditioned on the ETag, so a transfer outlasts try_timeout while
+		// a try that stalls is retried, readRetries times per read.
+		Body: resp.NewRetryReader(ctx, &blob.RetryReaderOptions{MaxRetries: c.readRetries}),
 	}, nil
 }
 

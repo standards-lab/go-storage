@@ -41,6 +41,9 @@ type Client struct {
 	container   *container.Client
 	blockSize   int64
 	concurrency int
+	// readRetries is how many times a Get's body resumes after a failed
+	// read: the retry count the SDK's policy applies to each request.
+	readRetries int32
 }
 
 // New constructs a Client from a finalized config without I/O, as the
@@ -87,7 +90,7 @@ func New(cfg storage.Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("azureblob: container client: %w", err)
 	}
-	return &Client{container: cc, blockSize: blockSize, concurrency: concurrency}, nil
+	return &Client{container: cc, blockSize: blockSize, concurrency: concurrency, readRetries: readRetries(opts.Retry.MaxRetries)}, nil
 }
 
 // uploadOptions reads the block_size and concurrency options, applying the
@@ -109,6 +112,19 @@ func uploadOptions(options map[string]string) (blockSize int64, concurrency int,
 		concurrency = n
 	}
 	return blockSize, concurrency, nil
+}
+
+// readRetries is the retry count the SDK's policy applies for the
+// configured MaxRetries: its default of 3 when unset (zero), and none when
+// negative.
+func readRetries(maxRetries int32) int32 {
+	switch {
+	case maxRetries == 0:
+		return 3
+	case maxRetries < 0:
+		return 0
+	}
+	return maxRetries
 }
 
 // clientOptions reads the max_retries and try_timeout options into the SDK's

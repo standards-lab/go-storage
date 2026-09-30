@@ -8,6 +8,13 @@ sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Changed
+
+- `try_timeout` bounds one operation, never a whole transfer. A `Get`'s body whose try deadline
+  passes mid-read resumes from its offset with a ranged request conditioned on the ETag, up to
+  `max_retries` times per read, so a download outlasts `try_timeout` however slowly its caller
+  reads. Before, the caller had to read the whole body within `try_timeout` of the request.
+
 ## [v0.3.0] - 2026-09-30
 
 ### Added

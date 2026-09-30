@@ -438,36 +438,91 @@ func TestGet_MapsHeadersAndBody(t *testing.T) {
 	}
 }
 
-// try_timeout's deadline covers the reading of a Get's body, which the
-// caller paces, so a body that stalls past it fails the read. The expiry
-// surfaces from Read as context.DeadlineExceeded, unclassified.
-func TestGet_TryTimeoutBoundsTheBody(t *testing.T) {
-	svc := newService(t, func(w http.ResponseWriter, r *http.Request) {
+// rangedBody serves content as the Blob service does, honoring the
+// x-ms-range a resumed read sends, and stalls after sending stallAt bytes
+// of the whole object on each request whose range starts before it, until
+// the try's deadline cancels the request.
+func rangedBody(content string, stallAt int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		from := 0
+		if v := r.Header.Get("x-ms-range"); v != "" {
+			_, _ = fmt.Sscanf(v, "bytes=%d-", &from)
+		}
 		blobHeaders(w, testETag, testLastModified)
-		w.Header().Set("Content-Length", "10")
+		w.Header().Set("Content-Length", strconv.Itoa(len(content)-from))
 		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, "hello")
-		w.(http.Flusher).Flush()
-		<-r.Context().Done()
-	})
+		if from < stallAt {
+			_, _ = io.WriteString(w, content[from:stallAt])
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+			return
+		}
+		_, _ = io.WriteString(w, content[from:])
+	}
+}
+
+// A body whose try deadline passes mid-read resumes from its offset with a
+// ranged GET conditioned on the ETag, so a transfer outlasts try_timeout.
+func TestGet_ResumesABodyPastTheTryTimeout(t *testing.T) {
+	svc := newService(t, rangedBody("helloworld", 5))
 	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "200ms"}))
 
 	blob, err := c.Get(t.Context(), "k", storage.GetOptions{})
 	if err != nil {
-		t.Fatalf("Get = %v, want nil: the headers arrive within the try timeout", err)
+		t.Fatalf("Get = %v, want nil", err)
 	}
 	defer func() { _ = blob.Body.Close() }()
+	data, err := io.ReadAll(blob.Body)
+	if err != nil || string(data) != "helloworld" {
+		t.Fatalf("ReadAll = %q, %v; want the whole body", data, err)
+	}
+	reqs := svc.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("service saw %d requests, want the GET and one resumption", len(reqs))
+	}
+	if got := reqs[1].Header.Get("x-ms-range"); got != "bytes=5-" {
+		t.Errorf("resumption range = %q, want bytes=5-", got)
+	}
+	if got := reqs[1].Header.Get("If-Match"); got != testETag {
+		t.Errorf("resumption If-Match = %q, want the first response's ETag", got)
+	}
+}
 
+// A body that stalls on every try fails its read once the retries are
+// spent, with the try timeout's context.DeadlineExceeded, unclassified.
+func TestGet_AStalledBodyFailsOnceItsRetriesAreSpent(t *testing.T) {
+	svc := newService(t, rangedBody("helloworld", 5))
+	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "100ms", "max_retries": "1"}))
+	svc.respond = func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-ms-range") != "" {
+			w.Header().Set("Content-Length", "5")
+			blobHeaders(w, testETag, testLastModified)
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+			return
+		}
+		rangedBody("helloworld", 5)(w, r)
+	}
+
+	blob, err := c.Get(t.Context(), "k", storage.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get = %v, want nil", err)
+	}
+	defer func() { _ = blob.Body.Close() }()
 	start := time.Now()
 	data, err := io.ReadAll(blob.Body)
-	if err == nil {
-		t.Fatalf("read of a stalled body = %q, nil; want the try timeout's error", data)
-	}
 	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, storage.ErrUnavailable) {
-		t.Errorf("read error = %v, want the unclassified context.DeadlineExceeded", err)
+		t.Fatalf("ReadAll = %q, %v; want the unclassified context.DeadlineExceeded", data, err)
+	}
+	if string(data) != "hello" {
+		t.Errorf("read %q before the failure, want hello", data)
+	}
+	if n := len(svc.Requests()); n != 2 {
+		t.Errorf("service saw %d requests, want the GET and one resumption with max_retries=1", n)
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("read took %v, want it cut off near the 200ms try timeout", elapsed)
+		t.Errorf("read took %v, want it cut off near two 100ms tries", elapsed)
 	}
 }
 

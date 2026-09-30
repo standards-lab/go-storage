@@ -115,3 +115,20 @@ func TestClientOptions_TryTimeout(t *testing.T) {
 		})
 	}
 }
+
+// A Get's body resumes as many times per read as the SDK's policy retries
+// each request.
+func TestReadRetries(t *testing.T) {
+	cases := []struct {
+		configured, want int32
+	}{
+		{0, 3},  // unset: the SDK's default
+		{-1, 0}, // max_retries=0: one try
+		{2, 2},
+	}
+	for _, tc := range cases {
+		if got := readRetries(tc.configured); got != tc.want {
+			t.Errorf("readRetries(%d) = %d, want %d", tc.configured, got, tc.want)
+		}
+	}
+}

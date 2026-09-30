@@ -80,10 +80,12 @@ limit, and reports `ErrUnavailable`. A caller that reads slowly spends its time 
 which the clock never counts, so a slow client's download is never cut off, however long it runs. A per-request deadline
 on the object operations belongs to the provider's transport instead: `azureblob`'s
 `try_timeout` is that deadline, so a stalled store cannot hold a request indefinitely. It bounds
-each try of a `Put` or a metadata call, not the whole call with its retries. A `Get` is
-one try whose deadline runs until its body is read, so the caller must read and close the body
-within `try_timeout` of the request, at its own pace; past the deadline the body's `Read` fails
-with an unclassified `context.DeadlineExceeded`.
+each try of a `Put` or a metadata call, not the whole call with its retries, and each try of a
+`Get`'s body: a body whose try deadline passes mid-read resumes from its offset with a ranged
+request conditioned on the ETag (the SDK's retry reader), so `try_timeout` is sized for one
+operation while a download runs as long as its caller reads. `ReadIdleTimeout` bounds each read with its
+resumptions, so it is set above `try_timeout`: a try that stalls then resumes once before the
+store is cut off.
 
 `azureblob`'s upload defaults trade memory for requests. A 4 MiB block is four times the SDK's
 1 MiB floor, so a multi-block body takes a quarter of the requests while the service's
