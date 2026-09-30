@@ -153,9 +153,9 @@ func (c *Config) applyEnv() error {
 }
 
 // applyOptionsEnv sets provider options from the variables under the
-// Env.Options prefix, as [Env] describes. It ignores a name whose suffix is
-// not a valid option key and an empty value, and copies the map before the
-// first write.
+// Env.Options prefix, as [Env] describes. It ignores an empty value and a
+// name whose suffix is not a valid option key, and it copies the map before
+// the first write.
 func (c *Config) applyOptionsEnv() {
 	if c.Env.Options == "" {
 		return

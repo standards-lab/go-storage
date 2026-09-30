@@ -18,32 +18,34 @@ only; each provider sub-module keeps its own.
 
 ### Changed
 
+- The `go-core` requirement is v0.5.0.
 - **Breaking:** `Store.Shutdown` is terminal. `Start` after `Shutdown` returns `ErrNotReady` without
-  calling the provider, and a `Shutdown` that lands while `Start` runs leaves the store not
-  started, with `Start` returning `ErrNotReady` even when the closed client then fails, and
-  without probing a client closed while `Start` ensured the container.
-- **Breaking:** `Store.Put` checks the key with the provider's `Capabilities().ValidateKey` before
-  the provider sees it, and returns that error, and it rejects a negative `PutOptions.Size`. A nil
-  `ValidateKey` accepts every key.
+  calling the provider. A `Shutdown` that lands while `Start` runs leaves the store not started:
+  `Start` returns `ErrNotReady`, even when the closed client then fails, and it skips the probe
+  when the client was closed while `Start` ensured the container.
+- **Breaking:** `Store.Put` checks the key with the provider's `Capabilities().ValidateKey` and
+  returns its error before the provider sees the key. A nil `ValidateKey` accepts every key.
+  `Store.Put` also rejects a negative `PutOptions.Size`.
 - **Breaking:** a `Put` without a `ContentType` stores and reports `application/octet-stream`.
-  `storagetest.Fake` does, and the conformance suite checks the `ContentType` of every `Put`,
+  `storagetest.Fake` does so, and the conformance suite checks the `ContentType` of every `Put`,
   `Get`, and `Stat` it makes.
 - **Breaking:** `storagetest.Fake`'s exported `Down` field is replaced by `SetDown`.
 - **Breaking:** the conformance suite fails a missing key whose error also matches
   `ErrContainerNotFound` or `ErrUnavailable`, so a provider that passed v0.2.1's suite may fail
   this one.
 - Every `Config` validation error has the form `storage: <field> <problem>`.
-- The package documentation states each contract fact once, beside the symbol it governs.
+- The package documentation states each contract fact once, beside the symbol it governs, and
+  each package comment lists the package's exports.
 
 ### Fixed
 
-- `Store.Start` reports a failure once the caller's context is done as that context's error, which
-  `errors.Is` matches, instead of classifying it as `ErrUnavailable`, even when the provider
-  classified it.
+- Once the caller's context is done, `Store.Start` reports a failure as an error that `errors.Is`
+  matches to that context's error, not as `ErrUnavailable`, even when the provider classified the
+  failure as `ErrUnavailable`.
 - `Config.Merge` copies `Options` before writing, so an overlay never reaches a map the caller
   shares.
-- `storagetest.WithPageSize` with 0 or less keeps the default page size, where `Fake.List`
-  panicked.
+- `storagetest.WithPageSize` with 0 or less keeps the default page size, where `Fake.List` used
+  to panic.
 - `storagetest.Fake.Put` reads the body and records the call before it reports an outage or a
   missing container, as its documentation states.
 

@@ -34,9 +34,9 @@ const largeBodySize = 3 << 20
 const maxPages = 100
 
 // Run is the conformance suite for a storage.Client. It runs one subtest per
-// contract behavior, calling newClient for each one and EnsureContainer on
-// the client it returns, so the container newClient's client is wired to may
-// not exist yet. Every key the suite writes sits under a random prefix of its
+// contract behavior, calling newClient for each and then EnsureContainer on
+// the returned client, so the container that client is wired to need not
+// exist yet. Every key the suite writes sits under a random prefix of its
 // own, and every subtest deletes what it wrote when it ends, so the suite can
 // run against a shared container that holds other objects. It asserts the
 // contract [storage.Client] documents and nothing a provider is free to
@@ -51,15 +51,15 @@ func Run(t *testing.T, newClient func(t *testing.T) storage.Client) {
 }
 
 // RunMissingContainer proves that a Client reports a missing container as
-// [storage.ErrContainerNotFound] and never as [storage.ErrNotFound]. newClient
-// returns a client wired to a container that does not exist; the suite never
-// calls EnsureContainer, so over a conforming client it creates nothing and
-// leaves nothing behind. A client whose Put succeeds anyway, as one that
-// creates its container on demand would, fails the check, and the object it
-// stored is deleted when the test ends.
-//
-// Probe and each object operation, Delete included, must fail with an error
+// [storage.ErrContainerNotFound] and never as [storage.ErrNotFound]: Probe
+// and each object operation, Delete included, must fail with an error
 // matching ErrContainerNotFound.
+//
+// newClient returns a client wired to a container that does not exist. The
+// suite never calls EnsureContainer, so over a conforming client it creates
+// nothing and leaves nothing behind. A client whose Put succeeds anyway, as
+// one that creates its container on demand would, fails the check, and the
+// test deletes the stored object when it ends.
 func RunMissingContainer(t *testing.T, newClient func(t *testing.T) storage.Client) {
 	t.Helper()
 	checkMissingContainer(t, newClient(t))

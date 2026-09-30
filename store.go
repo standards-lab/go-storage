@@ -11,7 +11,7 @@ import (
 )
 
 // Store wraps a provider's [Client] with the lifecycle and the limits from
-// [Config]; every object operation, and Probe, returns [ErrNotReady] before a
+// [Config]. Every object operation and Probe return [ErrNotReady] before a
 // successful Start or after Shutdown. A Store is safe for concurrent use.
 type Store struct {
 	client         Client
@@ -47,12 +47,14 @@ func New(c Client, cfg Config) *Store {
 
 // Start ensures the configured container exists, then probes the provider,
 // both under one context bounded by RequestTimeout, and marks the store
-// started. A failure matches [ErrUnavailable] with the provider's error kept,
-// except that a failure once the caller's ctx is done matches ctx.Err() and
-// not ErrUnavailable. Start after Shutdown returns [ErrNotReady], and so does
-// a Start that Shutdown lands during: Start probes no client closed while it
-// ensured the container, and a step that fails once Shutdown has run reports
-// ErrNotReady rather than the closed client's error.
+// started. A failure matches [ErrUnavailable] and keeps the provider's
+// error, except that once the caller's ctx is done a failure matches
+// ctx.Err() and not ErrUnavailable.
+//
+// Start returns [ErrNotReady] after Shutdown, and also when Shutdown runs
+// while Start is in progress. In that case Start skips the probe if Shutdown
+// ran while it ensured the container, and a step that fails once Shutdown
+// has run reports ErrNotReady rather than the closed client's error.
 func (s *Store) Start(ctx context.Context) error {
 	if s.isShut() {
 		return ErrNotReady
@@ -126,8 +128,9 @@ func (s *Store) Shutdown(context.Context) error {
 	return nil
 }
 
-// Ready reports live connectivity: false outside a successful Start and
-// Shutdown, and otherwise the result of a probe bounded by RequestTimeout.
+// Ready reports live connectivity. It returns false before a successful
+// Start or after Shutdown, and otherwise the result of a probe bounded by
+// RequestTimeout.
 func (s *Store) Ready() bool {
 	if !s.started.Load() {
 		return false
@@ -137,10 +140,11 @@ func (s *Store) Ready() bool {
 	return s.client.Probe(ctx) == nil
 }
 
-// Put writes body at key after checking key with the provider's ValidateKey.
-// A declared opts.Size or a body over MaxObjectSize fails with [ErrTooLarge];
-// a body shorter or longer than a declared Size fails with an error (short
-// wraps io.ErrUnexpectedEOF). Both checks fail the body's read, so the
+// Put writes body at key after checking key with the provider's
+// ValidateKey. A declared opts.Size over MaxObjectSize, or a body that runs
+// past it, fails with [ErrTooLarge]. A body shorter or longer than a
+// declared Size fails with an error, which wraps io.ErrUnexpectedEOF for a
+// short body. Both body checks fail the provider's read of the body, so the
 // provider commits nothing. A negative Size is an error the provider never
 // sees.
 func (s *Store) Put(ctx context.Context, key string, body io.Reader, opts PutOptions) (Object, error) {

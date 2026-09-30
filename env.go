@@ -20,9 +20,6 @@ type Env struct {
 // using [config.EnvName]. An empty prefix returns the zero Env, which disables
 // every override.
 func NewEnv(prefix string) Env {
-	if prefix == "" {
-		return Env{}
-	}
 	return Env{
 		Endpoint:       config.EnvName(prefix, "storage", "endpoint"),
 		Container:      config.EnvName(prefix, "storage", "container"),

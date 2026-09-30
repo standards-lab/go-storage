@@ -1,8 +1,10 @@
 // Package azureblob is the Azure Blob Storage provider for the storage
-// package: a storage.Client over one container of one storage account,
-// built on the Azure SDK for Go's azblob module and authenticated with the
-// account's shared key. The SDK enters a consumer's graph only when this
-// package is imported, once, at the composition root.
+// package. Its [Client] implements storage.Client over one container of one
+// storage account, built on the Azure SDK for Go's azblob module and
+// authenticated with the account's shared key, and [New] constructs it. The
+// SDK enters a consumer's graph only when this package is imported, once, at
+// the composition root. The sections below state how the Client maps
+// storage's contract onto the service.
 //
 // # Construction
 //
@@ -23,11 +25,12 @@
 // # Endpoints
 //
 // An empty Endpoint means the account's public service URL,
-// https://<Account>.blob.core.windows.net/. A set Endpoint is the service
-// URL as given, with the container name appended to its path, which reaches
-// Azurite's path-style http://127.0.0.1:10000/devstoreaccount1. Azurite must
-// run with --skipApiVersionCheck when the SDK's service version is newer than
-// the image knows; the SDK this module pins sends x-ms-version 2026-12-06.
+// https://<Account>.blob.core.windows.net/. A set Endpoint is the service URL
+// as given, and the Client appends the container name to its path, so it can
+// name Azurite's path-style URL http://127.0.0.1:10000/devstoreaccount1.
+// Azurite must run with --skipApiVersionCheck when the SDK's service version
+// is newer than the image knows; the SDK this module pins sends x-ms-version
+// 2026-12-06.
 //
 // # Options
 //
@@ -61,10 +64,10 @@
 // A Put without a ContentType resets a replaced blob's type to
 // application/octet-stream, so a caller that wants the type kept across a
 // replace passes it on every Put. [Client.List] returns the service's
-// NextMarker as Page.Next verbatim: Azure's is an opaque token and Azurite's
-// the page's last key. The service
-// quotes an ETag in response headers and leaves it unquoted in a listing's
-// XML; the client adds the quotes, so List and Stat report the same string.
+// NextMarker as Page.Next verbatim: Azure's is an opaque token, and
+// Azurite's is the page's last key. The service quotes an ETag in response
+// headers and leaves it unquoted in a listing's XML; the Client adds the
+// quotes, so List and Stat report the same string.
 //
 // # Keys
 //

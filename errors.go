@@ -14,7 +14,8 @@ var (
 	// exist. It never matches [ErrNotFound].
 	ErrContainerNotFound = errors.New("storage container not found")
 
-	// ErrTooLarge reports a Put body larger than Config.MaxObjectSize.
+	// ErrTooLarge reports a Put whose declared or actual size exceeds
+	// Config.MaxObjectSize.
 	ErrTooLarge = errors.New("storage object too large")
 
 	// ErrNotReady reports a call against a [Store] before a successful Start

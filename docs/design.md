@@ -51,8 +51,8 @@ store to carry the calls, so `Store` is where the size bound, the declared size,
 readiness gate are enforced for every consumer.
 
 `Store.Put` checks a key with the provider's `ValidateKey` before the provider sees it, so a bad
-key is a local error rather than a provider's 400, and it keeps its own size and declared-size
-checks even though a conforming provider enforces the declared size too, as defence in depth.
+key is a local error rather than a provider's 400. It keeps its own size and declared-size checks
+as defence in depth, although a conforming provider enforces the declared size too.
 
 `Shutdown` is terminal. A provider may close its transport on `Shutdown`, so a later `Start` would
 run over a closed client; `Start` returns `ErrNotReady` instead, including when a `Shutdown` lands
@@ -76,7 +76,7 @@ nothing different. `RequestTimeout` has a default because it bounds only the cal
 for itself; one timeout over every operation would cut off a large upload. A per-request deadline
 on the object operations belongs to the provider's transport instead: `azureblob`'s
 `try_timeout` is that deadline, so a stalled store cannot hold a request indefinitely. It bounds
-each try of a `Put` or a metadata call rather than the whole call, retries included. A `Get` is
+each try of a `Put` or a metadata call, not the whole call with its retries. A `Get` is
 one try whose deadline runs until its body is read, so the caller must read and close the body
 within `try_timeout` of the request, at its own pace; past the deadline the body's `Read` fails
 with an unclassified `context.DeadlineExceeded`.
@@ -87,8 +87,8 @@ with an unclassified `context.DeadlineExceeded`.
 upload at 16 MiB per `Put`. The block ceiling is 100 MiB, the largest the service accepted before
 version 2019-12-12, and the worker ceiling of 32 already reaches 128 MiB per `Put` at the default
 block. The SDK allocates each block buffer with an anonymous mmap as it is needed, so a body
-shorter than one block holds one buffer, and a process multiplies the figure by its concurrent
-`Put`s.
+shorter than one block holds one buffer. A process holds up to that per-`Put` figure once for each
+of its concurrent `Put`s.
 
 ## Swapping providers
 
