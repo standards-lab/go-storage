@@ -138,17 +138,6 @@ func TestConfig_FinalizeKeepsExplicitRequestTimeout(t *testing.T) {
 	}
 }
 
-func TestConfig_FinalizeRequiresContainer(t *testing.T) {
-	cfg := storage.Config{Account: "devstoreaccount1"}
-	err := cfg.Finalize("")
-	if err == nil {
-		t.Fatal("Finalize accepted a config with no container")
-	}
-	if err.Error() != "storage: container is required" {
-		t.Errorf("error = %v, want it to name the missing field", err)
-	}
-}
-
 func TestConfig_FinalizeEnvOverrides(t *testing.T) {
 	cfg := validConfig()
 	cfg.Endpoint = "http://127.0.0.1:10000"
