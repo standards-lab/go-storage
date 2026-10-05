@@ -41,7 +41,7 @@ func validateKey(key string) error {
 	case '.', '/', '\\':
 		return fmt.Errorf("azureblob: key ends in %q", key[len(key)-1])
 	}
-	for _, segment := range strings.Split(key, "/") {
+	for segment := range strings.SplitSeq(key, "/") {
 		if strings.HasSuffix(segment, ".") {
 			return fmt.Errorf("azureblob: key path segment %q ends in a dot", segment)
 		}

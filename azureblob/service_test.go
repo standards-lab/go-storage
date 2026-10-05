@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -193,9 +194,7 @@ func testConfig(t *testing.T, endpoint string, options map[string]string) storag
 		Key:       testKey,
 		Options:   map[string]string{"max_retries": "0"},
 	}
-	for k, v := range options {
-		cfg.Options[k] = v
-	}
+	maps.Copy(cfg.Options, options)
 	if err := cfg.Finalize(""); err != nil {
 		t.Fatalf("finalize config: %v", err)
 	}

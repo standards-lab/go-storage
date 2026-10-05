@@ -10,6 +10,25 @@ jq = "1.8.2"
 [env]
 GO_MODULES = ". azureblob"
 
+[tasks.check]
+description = "Build, vet, format, fix, tidy, test, and lint every module; writes nothing"
+run = '''
+set -eu
+export GOWORK=off
+for mod in $GO_MODULES; do
+  echo "check: $mod"
+  cd "$MISE_PROJECT_ROOT/$mod"
+  go build ./...
+  go vet ./...
+  unformatted=$(gofmt -l .)
+  if [ -n "$unformatted" ]; then echo "gofmt: unformatted files:"; echo "$unformatted"; exit 1; fi
+  go fix -diff ./...
+  go mod tidy -diff
+  go test -race ./...
+  golangci-lint run ./...
+done
+'''
+
 # Each module builds with the workspace off, resolving its pins the way a
 # consumer does, so a pin that no longer builds fails here and in CI rather
 # than being masked by go.work.

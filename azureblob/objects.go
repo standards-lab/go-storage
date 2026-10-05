@@ -71,14 +71,12 @@ func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (sto
 		return storage.Blob{}, errors.New("azureblob: get blob returned no body")
 	}
 	return storage.Blob{
-		Object: storage.Object{
-			Key:         key,
-			Size:        deref(resp.ContentLength),
-			ContentType: deref(resp.ContentType),
-			ETag:        entityTag(resp.ETag),
-			ModifiedAt:  deref(resp.LastModified),
-		},
-		Body: classifiedBody{c.resuming(ctx, resp)},
+		Key:         key,
+		Size:        deref(resp.ContentLength),
+		ContentType: deref(resp.ContentType),
+		ETag:        entityTag(resp.ETag),
+		ModifiedAt:  deref(resp.LastModified),
+		Body:        classifiedBody{c.resuming(ctx, resp)},
 	}, nil
 }
 

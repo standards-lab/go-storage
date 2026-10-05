@@ -252,8 +252,7 @@ func TestProbe_ConnectionRefused(t *testing.T) {
 	if !errors.Is(err, storage.ErrUnavailable) {
 		t.Fatalf("Probe against a closed port = %v, want ErrUnavailable", err)
 	}
-	var respErr *azcore.ResponseError
-	if errors.As(err, &respErr) {
+	if _, ok := errors.AsType[*azcore.ResponseError](err); ok {
 		t.Fatalf("Probe against a closed port = %v, want no ResponseError in the chain", err)
 	}
 }

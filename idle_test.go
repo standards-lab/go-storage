@@ -28,8 +28,9 @@ type stallingClient struct {
 func (c *stallingClient) Get(ctx context.Context, key string, _ storage.GetOptions) (storage.Blob, error) {
 	c.ctx = ctx
 	return storage.Blob{
-		Object: storage.Object{Key: key, Size: int64(len(c.head)) + 1},
-		Body:   io.NopCloser(io.MultiReader(strings.NewReader(c.head), stall{ctx})),
+		Key:  key,
+		Size: int64(len(c.head)) + 1,
+		Body: io.NopCloser(io.MultiReader(strings.NewReader(c.head), stall{ctx})),
 	}, nil
 }
 
