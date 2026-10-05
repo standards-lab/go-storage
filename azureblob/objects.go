@@ -166,7 +166,10 @@ func (c *Client) List(ctx context.Context, opts storage.ListOptions) (storage.Pa
 			obj.Size = deref(p.ContentLength)
 			obj.ContentType = deref(p.ContentType)
 			obj.ETag = entityTag(p.ETag)
-			obj.ModifiedAt = deref(p.LastModified)
+			// azcore parses a listing's RFC 7231 time in a fixed GMT zone
+			// since v1.23.2; UTC keeps List's ModifiedAt identical to the
+			// one Put, Get, and Stat report from the response headers.
+			obj.ModifiedAt = deref(p.LastModified).UTC()
 		}
 		page.Objects = append(page.Objects, obj)
 	}
