@@ -1,9 +1,15 @@
 package azureblob_test
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -25,24 +31,22 @@ func newClient(t *testing.T, cfg storage.Config) *azureblob.Client {
 
 func TestNew_RequiresContainerAccountAndKey(t *testing.T) {
 	cases := []struct {
-		name  string
-		strip func(*storage.Config)
-		want  string
+		name     string
+		endpoint string
+		strip    func(*storage.Config)
+		want     string
 	}{
-		{"container", func(c *storage.Config) { c.Container = "" }, "container required"},
-		{"account", func(c *storage.Config) { c.Account = "" }, "account required"},
-		{"account with endpoint", func(c *storage.Config) { c.Account = "" }, "account required"},
-		{"key", func(c *storage.Config) { c.Key = "" }, "key required"},
+		{"container", "http://127.0.0.1:10000/" + testAccount, func(c *storage.Config) { c.Container = "" }, "container required"},
+		{"account", "", func(c *storage.Config) { c.Account = "" }, "account required"},
+		{"account with endpoint", "http://127.0.0.1:10000/" + testAccount, func(c *storage.Config) { c.Account = "" }, "account required"},
+		{"key", "http://127.0.0.1:10000/" + testAccount, func(c *storage.Config) { c.Key = "" }, "key required"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Finalize first, since Finalize itself rejects an empty
 			// container; the field is cleared afterwards so New's own check
 			// is what fails.
-			cfg := testConfig(t, "http://127.0.0.1:10000/"+testAccount, nil)
-			if tc.name == "account" {
-				cfg.Endpoint = ""
-			}
+			cfg := testConfig(t, tc.endpoint, nil)
 			tc.strip(&cfg)
 			_, err := azureblob.New(cfg)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -76,16 +80,6 @@ func TestNew_RejectsBadTryTimeout(t *testing.T) {
 	}
 }
 
-// A container name the service would refuse fails New rather than Start.
-func TestNew_RejectsBadContainerName(t *testing.T) {
-	cfg := testConfig(t, "http://127.0.0.1:10000/"+testAccount, nil)
-	cfg.Container = "My_Files"
-	_, err := azureblob.New(cfg)
-	if err == nil || !strings.Contains(err.Error(), "container name") {
-		t.Fatalf("New = %v, want an error naming the container name", err)
-	}
-}
-
 func TestNew_RejectsBadKey(t *testing.T) {
 	cfg := testConfig(t, "http://127.0.0.1:10000/"+testAccount, nil)
 	cfg.Key = "not base64!"
@@ -94,9 +88,14 @@ func TestNew_RejectsBadKey(t *testing.T) {
 	}
 }
 
+// A key the package does not list is ignored: the client it builds works.
 func TestNew_IgnoresUnknownOptions(t *testing.T) {
-	cfg := testConfig(t, "http://127.0.0.1:10000/"+testAccount, map[string]string{"region": "us-east-1"})
-	newClient(t, cfg)
+	svc := newService(t, status(http.StatusOK))
+	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"region": "us-east-1"}))
+
+	if err := c.Probe(t.Context()); err != nil {
+		t.Fatalf("Probe = %v, want nil", err)
+	}
 }
 
 func TestNew_PanicsOnUnfinalizedConfig(t *testing.T) {
@@ -296,20 +295,122 @@ func TestProbe_CallerDeadline(t *testing.T) {
 	}
 }
 
-func TestCapabilities(t *testing.T) {
+// The rules ValidateKey applies are proved in keys_test.go.
+func TestCapabilities_MaxKeyLength(t *testing.T) {
 	c := newClient(t, testConfig(t, "http://127.0.0.1:10000/"+testAccount, nil))
 
-	caps := c.Capabilities()
-	if caps.MaxKeyLength != 1024 {
-		t.Errorf("MaxKeyLength = %d, want 1024", caps.MaxKeyLength)
+	if got := c.Capabilities().MaxKeyLength; got != 1024 {
+		t.Errorf("MaxKeyLength = %d, want 1024", got)
 	}
-	if caps.ValidateKey == nil {
-		t.Fatal("ValidateKey is nil")
+}
+
+// A set Endpoint is the service URL as given, and the client appends the
+// container name to its path.
+func TestNew_EndpointPath(t *testing.T) {
+	for _, suffix := range []string{"/" + testAccount, "/" + testAccount + "/"} {
+		t.Run(suffix, func(t *testing.T) {
+			svc := newService(t, status(http.StatusOK))
+			c := newClient(t, testConfig(t, svc.srv.URL+suffix, nil))
+
+			if err := c.Probe(t.Context()); err != nil {
+				t.Fatalf("Probe = %v, want nil", err)
+			}
+			if reqs := svc.Requests(); len(reqs) != 1 || reqs[0].Path != "/"+testAccount+"/"+testContainer {
+				t.Fatalf("service saw %+v, want one request to /%s/%s", reqs, testAccount, testContainer)
+			}
+		})
 	}
-	if err := caps.ValidateKey("storagetest/0123abcd/x.txt"); err != nil {
-		t.Errorf("ValidateKey(valid) = %v", err)
+}
+
+// defaultEndpointChild names the environment variable under which
+// TestNew_DefaultEndpoint runs as the child process it starts.
+const defaultEndpointChild = "AZUREBLOB_TEST_DEFAULT_ENDPOINT_CHILD"
+
+// An empty Endpoint means the account's public service URL. The test reruns
+// itself as a child whose HTTPS proxy is a listener here, so the host the
+// client dials is observed without leaving the machine: the child's Probe
+// tunnels through the proxy with a CONNECT to that host.
+func TestNew_DefaultEndpoint(t *testing.T) {
+	if os.Getenv(defaultEndpointChild) != "" {
+		cfg := testConfig(t, "", nil)
+		cfg.Account = "acct"
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		_ = newClient(t, cfg).Probe(ctx)
+		return
 	}
-	if err := caps.ValidateKey(""); err == nil {
-		t.Error("ValidateKey(\"\") = nil, want an error")
+
+	proxy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = proxy.Close() })
+	connected := make(chan *http.Request, 1)
+	go func() {
+		conn, err := proxy.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		req, err := http.ReadRequest(bufio.NewReader(conn))
+		if err != nil {
+			return
+		}
+		connected <- req
+		_, _ = io.WriteString(conn, "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+	}()
+
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestNew_DefaultEndpoint$")
+	cmd.Env = append(os.Environ(),
+		defaultEndpointChild+"=1",
+		"HTTPS_PROXY=http://"+proxy.Addr().String(),
+		"NO_PROXY=", "no_proxy=")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child: %v\n%s", err, out)
+	}
+	select {
+	case req := <-connected:
+		if req.Method != http.MethodConnect || req.Host != "acct.blob.core.windows.net:443" {
+			t.Errorf("client tunnelled %s %s, want CONNECT acct.blob.core.windows.net:443", req.Method, req.Host)
+		}
+	default:
+		t.Fatal("the client never reached the proxy")
+	}
+}
+
+// The upload option bounds that the package documentation lists are inclusive.
+// Their rejection one past each bound is in TestNew_RejectsBadUploadOptions.
+func TestNew_AcceptsUploadOptionBounds(t *testing.T) {
+	for _, opt := range []map[string]string{
+		{"block_size": "1048576"},
+		{"block_size": "104857600"},
+		{"concurrency": "1"},
+		{"concurrency": "32"},
+	} {
+		t.Run(fmt.Sprint(opt), func(t *testing.T) {
+			if _, err := azureblob.New(testConfig(t, "http://127.0.0.1:10000/"+testAccount, opt)); err != nil {
+				t.Fatalf("New with %v = %v, want nil", opt, err)
+			}
+		})
+	}
+}
+
+// An unset max_retries keeps the SDK's default of three retries. The
+// service's retry-after-ms answer stands in for the default backoff, so the
+// test does not wait it out.
+func TestMaxRetries_UnsetKeepsTheSDKDefault(t *testing.T) {
+	svc := newService(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("x-ms-retry-after-ms", "1")
+		azureError(w, http.StatusServiceUnavailable, "ServerBusy")
+	})
+	cfg := testConfig(t, svc.endpoint(), nil)
+	delete(cfg.Options, "max_retries")
+	c := newClient(t, cfg)
+
+	if err := c.Probe(t.Context()); !errors.Is(err, storage.ErrUnavailable) {
+		t.Fatalf("Probe = %v, want ErrUnavailable", err)
+	}
+	if n := len(svc.Requests()); n != 4 {
+		t.Errorf("service saw %d requests, want 4: one try and three retries", n)
 	}
 }

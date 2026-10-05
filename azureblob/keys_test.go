@@ -1,15 +1,25 @@
-package azureblob
+package azureblob_test
 
 import (
 	"strings"
 	"testing"
+
+	"github.com/standards-lab/go-storage/azureblob"
 )
 
-func TestValidateKey(t *testing.T) {
+// The blob-name rules the package documentation lists, through the
+// ValidateKey a Client declares. Azurite accepts a key that breaks each
+// rule, so only these cases prove them.
+func TestCapabilities_ValidateKey(t *testing.T) {
+	validateKey := newClient(t, testConfig(t, "http://127.0.0.1:10000/"+testAccount, nil)).Capabilities().ValidateKey
+	if validateKey == nil {
+		t.Fatal("Capabilities().ValidateKey = nil, want the blob-name rules")
+	}
+
 	// A 1,024-rune key of two-byte runes is 2,048 bytes, so a byte count
 	// would reject it.
-	longest := strings.Repeat("é", maxKeyLength)
-	mostSegments := strings.Repeat("a/", maxKeySegments-1) + "a"
+	longest := strings.Repeat("é", 1024)
+	mostSegments := strings.Repeat("a/", 253) + "a"
 
 	valid := []struct{ name, key string }{
 		{"storagetest prefix form", "storagetest/0123abcdef/x.txt"},
@@ -25,7 +35,7 @@ func TestValidateKey(t *testing.T) {
 	for _, tc := range valid {
 		t.Run("valid/"+tc.name, func(t *testing.T) {
 			if err := validateKey(tc.key); err != nil {
-				t.Errorf("validateKey(%q) = %v, want nil", tc.key, err)
+				t.Errorf("ValidateKey(%q) = %v, want nil", tc.key, err)
 			}
 		})
 	}
@@ -49,20 +59,26 @@ func TestValidateKey(t *testing.T) {
 		t.Run("invalid/"+tc.name, func(t *testing.T) {
 			err := validateKey(tc.key)
 			if err == nil {
-				t.Fatalf("validateKey(%q) = nil, want an error containing %q", tc.key, tc.want)
+				t.Fatalf("ValidateKey(%q) = nil, want an error containing %q", tc.key, tc.want)
 			}
 			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("validateKey(%q) = %q, want it to contain %q", tc.key, err, tc.want)
+				t.Errorf("ValidateKey(%q) = %q, want it to contain %q", tc.key, err, tc.want)
 			}
 		})
 	}
 }
 
-func TestValidateContainer(t *testing.T) {
+// The container-name rules the package documentation lists, which New
+// applies.
+func TestNew_ContainerName(t *testing.T) {
 	for _, name := range []string{"abc", "unit", "acceptance-0123abcd", "a1-b2-c3", strings.Repeat("a", 63)} {
-		if err := validateContainer(name); err != nil {
-			t.Errorf("validateContainer(%q) = %v, want nil", name, err)
-		}
+		t.Run("valid/"+name, func(t *testing.T) {
+			cfg := testConfig(t, "http://127.0.0.1:10000/"+testAccount, nil)
+			cfg.Container = name
+			if _, err := azureblob.New(cfg); err != nil {
+				t.Errorf("New with container %q = %v, want nil", name, err)
+			}
+		})
 	}
 
 	invalid := []struct{ name, container, want string }{
@@ -76,10 +92,12 @@ func TestValidateContainer(t *testing.T) {
 		{"double hyphen", "my--files", "hyphen"},
 	}
 	for _, tc := range invalid {
-		t.Run(tc.name, func(t *testing.T) {
-			err := validateContainer(tc.container)
+		t.Run("invalid/"+tc.name, func(t *testing.T) {
+			cfg := testConfig(t, "http://127.0.0.1:10000/"+testAccount, nil)
+			cfg.Container = tc.container
+			_, err := azureblob.New(cfg)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("validateContainer(%q) = %v, want an error containing %q", tc.container, err, tc.want)
+				t.Errorf("New with container %q = %v, want an error containing %q", tc.container, err, tc.want)
 			}
 		})
 	}

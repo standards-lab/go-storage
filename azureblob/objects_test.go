@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -214,6 +216,96 @@ func TestPut_MultipleBlocks(t *testing.T) {
 	}
 	if n := strings.Count(string(commit.Body), "<Latest>"); n != 3 {
 		t.Errorf("block list commits %d blocks, want 3: %s", n, commit.Body)
+	}
+}
+
+// An unset block_size stages 4 MiB blocks.
+func TestPut_DefaultBlockSize(t *testing.T) {
+	svc := newService(t, blobStored(testETag, testLastModified))
+	c := newClient(t, testConfig(t, svc.endpoint(), nil))
+
+	const size = 4<<20 + 1
+	if _, err := c.Put(t.Context(), "k", readOnly{bytes.NewReader(make([]byte, size))}, storage.PutOptions{}); err != nil {
+		t.Fatalf("Put = %v, want nil", err)
+	}
+	var staged []int
+	for _, r := range svc.Requests() {
+		if q, _ := url.ParseQuery(r.Query); q.Get("comp") == "block" {
+			staged = append(staged, len(r.Body))
+		}
+	}
+	slices.Sort(staged)
+	if !slices.Equal(staged, []int{1, 4 << 20}) {
+		t.Errorf("staged blocks of %v bytes, want one of 4 MiB and one of 1 byte", staged)
+	}
+}
+
+// concurrency bounds the blocks one Put stages at once, 4 when unset. The
+// service holds every Put Block until as many as the case expects are in
+// flight together, so a client with fewer workers never gets there; it then
+// holds each a moment longer, so a client with more workers sends its extra
+// block while the others are still held.
+func TestPut_Concurrency(t *testing.T) {
+	cases := []struct {
+		concurrency string // "" leaves the option unset
+		want        int
+	}{
+		{"", 4},
+		{"1", 1},
+		{"2", 2},
+	}
+	for _, tc := range cases {
+		t.Run("concurrency="+tc.concurrency, func(t *testing.T) {
+			var mu sync.Mutex
+			var inFlight, peak int
+			full, closed := make(chan struct{}), false
+			stored := blobStored(testETag, testLastModified)
+			svc := newService(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("comp") == "block" {
+					mu.Lock()
+					inFlight++
+					peak = max(peak, inFlight)
+					if inFlight == tc.want && !closed {
+						close(full)
+						closed = true
+					}
+					mu.Unlock()
+					select {
+					case <-full:
+					case <-time.After(5 * time.Second):
+						// Too few workers: stop holding the rest.
+						mu.Lock()
+						if !closed {
+							close(full)
+							closed = true
+						}
+						mu.Unlock()
+					}
+					time.Sleep(100 * time.Millisecond)
+					mu.Lock()
+					inFlight--
+					mu.Unlock()
+				}
+				stored(w, r)
+			})
+			options := map[string]string{"block_size": "1048576"}
+			if tc.concurrency != "" {
+				options["concurrency"] = tc.concurrency
+			}
+			c := newClient(t, testConfig(t, svc.endpoint(), options))
+
+			// Two more 1 MiB blocks than the workers the case expects, so a
+			// client with more workers is caught.
+			body := make([]byte, (tc.want+2)<<20)
+			if _, err := c.Put(t.Context(), "k", readOnly{bytes.NewReader(body)}, storage.PutOptions{}); err != nil {
+				t.Fatalf("Put = %v, want nil", err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if peak != tc.want {
+				t.Errorf("at most %d blocks were in flight together, want %d", peak, tc.want)
+			}
+		})
 	}
 }
 
@@ -487,60 +579,58 @@ func TestGet_ResumesABodyPastTheTryTimeout(t *testing.T) {
 	}
 }
 
-// A body that stalls on every try fails its read once the retries are
-// spent, as storage.ErrUnavailable.
+// A body that stalls on every try resumes as many times per read as the
+// policy retries each request, and then fails the read as
+// storage.ErrUnavailable. With max_retries 0 the body does not resume.
 func TestGet_AStalledBodyFailsOnceItsRetriesAreSpent(t *testing.T) {
-	svc := newService(t, rangedBody("helloworld", 5))
-	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "100ms", "max_retries": "1"}))
-	svc.respond = func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("x-ms-range") != "" {
-			w.Header().Set("Content-Length", "5")
-			blobHeaders(w, testETag, testLastModified)
-			w.WriteHeader(http.StatusOK)
-			w.(http.Flusher).Flush()
-			<-r.Context().Done()
-			return
-		}
-		rangedBody("helloworld", 5)(w, r)
+	cases := []struct {
+		maxRetries string // "" leaves the option unset
+		requests   int    // the GET and its resumptions
+	}{
+		{"", 4}, // unset: the SDK's default of three retries
+		{"0", 1},
+		{"1", 2},
+		{"2", 3},
 	}
+	for _, tc := range cases {
+		t.Run("max_retries="+tc.maxRetries, func(t *testing.T) {
+			svc := newService(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("x-ms-range") != "" {
+					w.Header().Set("Content-Length", "5")
+					blobHeaders(w, testETag, testLastModified)
+					w.WriteHeader(http.StatusOK)
+					w.(http.Flusher).Flush()
+					<-r.Context().Done()
+					return
+				}
+				rangedBody("helloworld", 5)(w, r)
+			})
+			cfg := testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "100ms", "max_retries": tc.maxRetries})
+			if tc.maxRetries == "" {
+				delete(cfg.Options, "max_retries")
+			}
+			c := newClient(t, cfg)
 
-	blob, err := c.Get(t.Context(), "k", storage.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get = %v, want nil", err)
-	}
-	defer func() { _ = blob.Body.Close() }()
-	start := time.Now()
-	data, err := io.ReadAll(blob.Body)
-	if !errors.Is(err, storage.ErrUnavailable) {
-		t.Fatalf("ReadAll = %q, %v; want ErrUnavailable", data, err)
-	}
-	if string(data) != "hello" {
-		t.Errorf("read %q before the failure, want hello", data)
-	}
-	if n := len(svc.Requests()); n != 2 {
-		t.Errorf("service saw %d requests, want the GET and one resumption with max_retries=1", n)
-	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("read took %v, want it cut off near two 100ms tries", elapsed)
-	}
-}
-
-// max_retries=0 means one try: a body whose try deadline passes is not
-// resumed.
-func TestGet_NoRetriesMeansNoResumption(t *testing.T) {
-	svc := newService(t, rangedBody("helloworld", 5))
-	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "100ms", "max_retries": "0"}))
-
-	blob, err := c.Get(t.Context(), "k", storage.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get = %v, want nil", err)
-	}
-	defer func() { _ = blob.Body.Close() }()
-	if _, err := io.ReadAll(blob.Body); !errors.Is(err, storage.ErrUnavailable) {
-		t.Fatalf("ReadAll = %v, want ErrUnavailable", err)
-	}
-	if n := len(svc.Requests()); n != 1 {
-		t.Errorf("service saw %d requests, want 1 with max_retries=0", n)
+			blob, err := c.Get(t.Context(), "k", storage.GetOptions{})
+			if err != nil {
+				t.Fatalf("Get = %v, want nil", err)
+			}
+			defer func() { _ = blob.Body.Close() }()
+			start := time.Now()
+			data, err := io.ReadAll(blob.Body)
+			if !errors.Is(err, storage.ErrUnavailable) {
+				t.Fatalf("ReadAll = %q, %v; want ErrUnavailable", data, err)
+			}
+			if string(data) != "hello" {
+				t.Errorf("read %q before the failure, want hello", data)
+			}
+			if n := len(svc.Requests()); n != tc.requests {
+				t.Errorf("service saw %d requests, want %d", n, tc.requests)
+			}
+			if elapsed := time.Since(start); elapsed > 5*time.Second {
+				t.Errorf("read took %v, want it cut off near %d 100ms tries", elapsed, tc.requests)
+			}
+		})
 	}
 }
 
@@ -857,5 +947,52 @@ func TestNew_RejectsBadUploadOptions(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// The Client reports every ETag in HTTP entity-tag form, whether the service
+// sent it quoted in a response header or unquoted in a listing's XML, and
+// reports none when the service sent none.
+func TestETag_EntityTagForm(t *testing.T) {
+	cases := []struct {
+		name string
+		sent string // "" sends no ETag
+		want string
+	}{
+		{"none", "", ""},
+		{"unquoted", "0x8DDF0E1C2B3A4D5", `"0x8DDF0E1C2B3A4D5"`},
+		{"quoted", `"0x8DDF0E1C2B3A4D5"`, `"0x8DDF0E1C2B3A4D5"`},
+		{"weak validator", `W/"0x8DDF0E1C2B3A4D5"`, `W/"0x8DDF0E1C2B3A4D5"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newService(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("comp") == "list" {
+					writeListPage(w, listPage{Items: []listItem{{Name: "k", Size: 1, ETag: tc.sent, LastModified: testLastModified}}})
+					return
+				}
+				if tc.sent != "" {
+					w.Header().Set("ETag", tc.sent)
+				}
+				w.Header().Set("Content-Length", "1")
+				w.WriteHeader(http.StatusOK)
+			})
+			c := newClient(t, testConfig(t, svc.endpoint(), nil))
+
+			stat, err := c.Stat(t.Context(), "k")
+			if err != nil {
+				t.Fatalf("Stat = %v, want nil", err)
+			}
+			if stat.ETag != tc.want {
+				t.Errorf("Stat ETag = %q, want %q", stat.ETag, tc.want)
+			}
+			page, err := c.List(t.Context(), storage.ListOptions{})
+			if err != nil {
+				t.Fatalf("List = %v, want nil", err)
+			}
+			if len(page.Objects) != 1 || page.Objects[0].ETag != tc.want {
+				t.Errorf("List = %+v, want one object with ETag %q", page.Objects, tc.want)
+			}
+		})
 	}
 }

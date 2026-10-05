@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -162,7 +163,7 @@ func TestAcceptance_StoreStart(t *testing.T) {
 			t.Fatalf("Delete: %v", err)
 		}
 	}
-	if _, err := store.Stat(ctx, key); err == nil {
-		t.Error("Stat after Delete = nil, want ErrNotFound")
+	if _, err := store.Stat(ctx, key); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("Stat after Delete = %v, want ErrNotFound", err)
 	}
 }
