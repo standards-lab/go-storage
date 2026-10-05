@@ -378,7 +378,7 @@ func TestNew_DefaultEndpoint(t *testing.T) {
 	}
 }
 
-// The upload option bounds the package documentation lists are inclusive.
+// The upload option bounds that the package documentation lists are inclusive.
 // Their rejection one past each bound is in TestNew_RejectsBadUploadOptions.
 func TestNew_AcceptsUploadOptionBounds(t *testing.T) {
 	for _, opt := range []map[string]string{
