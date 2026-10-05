@@ -49,8 +49,9 @@ the standard's principles it enhances are stated below. Its repository-level pri
 The repository uses a Go workspace and [mise](https://mise.jdx.dev):
 
 ```
-mise run build   # build every module standalone, with the workspace off
-mise run test    # test every module
+mise run check      # build, vet, format, fix, tidy, test, and lint every module; writes nothing
+mise run currency   # report requirements, Go, tools, actions, and images behind their latest
+mise run upgrade    # upgrade every module's go directive and requirements, and the tools, to their latest
 ```
 
 The unit tests need no service. `azureblob`'s acceptance tests run the conformance suite against

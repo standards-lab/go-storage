@@ -6,54 +6,33 @@ on:
   pull_request:
     branches: [main]
 
-# The module matrix grows with the repository: each new module is added here, to
-# the go.work use-list, and to mise GO_MODULES together.
 jobs:
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        module:
-          - "."
-          - "azureblob"
+  check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7.0.1
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.27"
+      - uses: jdx/mise-action@v5.1.1
 
-      # Built with the workspace off, so the module resolves its pins through the
-      # proxy the way a consumer does; the committed go.work would otherwise mask
-      # a pin that no longer builds.
-      - name: go build (GOWORK=off)
-        working-directory: ${{ matrix.module }}
-        env:
-          GOWORK: "off"
-        run: go build ./...
+      - name: mise run check
+        run: mise run check
 
-      - name: go vet
-        working-directory: ${{ matrix.module }}
-        run: go vet ./...
+  # azureblob's acceptance tests run the conformance suite against an Azurite
+  # container, which a step starts because a service container cannot take
+  # Azurite's command-line flags. The step names the image on its own image:
+  # line, so mise run currency finds the pin.
+  acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
 
-      - name: gofmt
-        working-directory: ${{ matrix.module }}
-        run: |
-          unformatted=$(gofmt -l .)
-          [ -z "$unformatted" ] || { echo "$unformatted"; exit 1; }
+      - uses: jdx/mise-action@v5.1.1
 
-      - name: go mod tidy -diff
-        working-directory: ${{ matrix.module }}
-        run: go mod tidy -diff
-
-      # azureblob's acceptance tests run the conformance suite against an
-      # Azurite container, which a step starts because a service container
-      # cannot take Azurite's command-line flags.
       - name: start Azurite
-        if: matrix.module == 'azureblob'
+        env:
+          image: mcr.microsoft.com/azure-storage/azurite:3.37.0
         run: |
-          docker run -d --name azurite -p 10000:10000 mcr.microsoft.com/azure-storage/azurite:3.37.0 \
+          docker run -d --name azurite -p 10000:10000 "$image" \
             azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck --loose
           for _ in $(seq 30); do
             curl -s -o /dev/null http://127.0.0.1:10000/ && exit 0
@@ -63,24 +42,7 @@ jobs:
           exit 1
 
       - name: go test -race
-        working-directory: ${{ matrix.module }}
+        working-directory: azureblob
         env:
-          AZUREBLOB_TEST_ENDPOINT: ${{ matrix.module == 'azureblob' && 'http://127.0.0.1:10000/devstoreaccount1' || '' }}
+          AZUREBLOB_TEST_ENDPOINT: http://127.0.0.1:10000/devstoreaccount1
         run: go test -race ./...
-
-  lint:
-    strategy:
-      fail-fast: false
-      matrix:
-        module:
-          - "."
-          - "azureblob"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.13.2
-          working-directory: ${{ matrix.module }}

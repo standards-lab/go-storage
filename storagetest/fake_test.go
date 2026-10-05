@@ -630,9 +630,7 @@ func TestFake_ConcurrentPutGet(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for w := range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			key := fmt.Sprintf("worker-%d", w)
 			for i := range rounds {
 				content := fmt.Sprintf("%d:%d", w, i)
@@ -662,7 +660,7 @@ func TestFake_ConcurrentPutGet(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
