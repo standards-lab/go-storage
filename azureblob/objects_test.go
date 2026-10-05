@@ -241,8 +241,10 @@ func TestPut_DefaultBlockSize(t *testing.T) {
 }
 
 // concurrency bounds the blocks one Put stages at once, 4 when unset. The
-// service holds each Put Block a while, so every block the client has a
-// worker for is in flight together.
+// service holds every Put Block until as many as the case expects are in
+// flight together, so a client with fewer workers never gets there; it then
+// holds each a moment longer, so a client with more workers sends its extra
+// block while the others are still held.
 func TestPut_Concurrency(t *testing.T) {
 	cases := []struct {
 		concurrency string // "" leaves the option unset
@@ -256,14 +258,30 @@ func TestPut_Concurrency(t *testing.T) {
 		t.Run("concurrency="+tc.concurrency, func(t *testing.T) {
 			var mu sync.Mutex
 			var inFlight, peak int
+			full, closed := make(chan struct{}), false
 			stored := blobStored(testETag, testLastModified)
 			svc := newService(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Query().Get("comp") == "block" {
 					mu.Lock()
 					inFlight++
 					peak = max(peak, inFlight)
+					if inFlight == tc.want && !closed {
+						close(full)
+						closed = true
+					}
 					mu.Unlock()
-					time.Sleep(300 * time.Millisecond)
+					select {
+					case <-full:
+					case <-time.After(5 * time.Second):
+						// Too few workers: stop holding the rest.
+						mu.Lock()
+						if !closed {
+							close(full)
+							closed = true
+						}
+						mu.Unlock()
+					}
+					time.Sleep(100 * time.Millisecond)
 					mu.Lock()
 					inFlight--
 					mu.Unlock()
