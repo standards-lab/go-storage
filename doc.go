@@ -34,8 +34,9 @@
 // A composition root defines the Store as a node of a go-core graph and
 // hands the built System to a lifecycle Coordinator. The Store is a
 // lifecycle Starter, Stopper, and ReadinessChecker, so the Coordinator
-// starts it in its layer, checks it for readiness under the node's name,
-// and shuts it down, all inferred from its methods with no adapter:
+// starts it in its layer, shuts it down, and lists its readiness among its
+// Checks under the node's name, all inferred from its methods with no
+// adapter:
 //
 //	g := graph.New()
 //	store := g.Define("storage", func(*graph.Scope) (*storage.Store, error) {
@@ -52,8 +53,8 @@
 //	}
 //	return lifecycle.New(sys, lifecycleCfg).Run(ctx)
 //
-// The Coordinator also calls Shutdown after a failed Start, which the Store
-// handles: Shutdown is safe before Start and after a failed Start.
+// The Coordinator also calls Shutdown after a failed Start, which
+// [Store.Shutdown] allows.
 //
 // # Configuration
 //
