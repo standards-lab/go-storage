@@ -23,9 +23,11 @@ the standard's principles it enhances are stated below. Its repository-level pri
   application supplies them. The two defaults bound what no caller controls: `RequestTimeout`
   bounds the calls `Store` makes on its own behalf in `Start` and `Ready`, and `ReadIdleTimeout`
   bounds each read of a `Get`'s body, so a stalled store is cut off while a slow caller is not.
-- Storage gates readiness: `Store` registers with the process lifecycle through a `Start`, a
-  `Shutdown`, and a `Ready` check that probes the provider live. `Start` ensures the configured
-  container exists before it probes, so an empty store starts cleanly.
+- Storage gates readiness. `Store` is the value of a node in a go-core `graph`. The `lifecycle`
+  Coordinator starts it with `Start`, shuts it down with `Shutdown`, and lists its `Ready` check,
+  which probes the provider live, among its checks. The Coordinator infers all three from
+  `Store`'s methods, so `Store` needs no adapter. `Start` ensures the configured container exists
+  before it probes, so an empty store starts cleanly.
 - A write is all or nothing. A failed `Put` stores nothing and leaves an existing object
   unchanged, and a declared size that disagrees with the body is such a failure. The
   `storagetest` suite proves each provider keeps this.

@@ -19,8 +19,11 @@ import (
 	"github.com/standards-lab/go-storage/storagetest"
 )
 
+// A *Store takes part in a lifecycle.Coordinator's startup, shutdown, and
+// readiness as the Value of a graph.Dependency, with no adapter.
 var (
 	_ storage.Client             = (*storage.Store)(nil)
+	_ lifecycle.Subsystem        = (*storage.Store)(nil)
 	_ lifecycle.ReadinessChecker = (*storage.Store)(nil)
 )
 
@@ -155,32 +158,6 @@ func TestNew_PerformsNoIO(t *testing.T) {
 	}
 	if s.Ready() {
 		t.Error("Ready() = true before Start, want false")
-	}
-}
-
-func TestStore_LifecycleServiceShape(t *testing.T) {
-	f := storagetest.NewFake()
-	s := storage.New(f, finalizedConfig(t, 0, 0))
-
-	// The bare method values and the Store itself fill a lifecycle.Service
-	// without an adapter; driving the service through its fields proves the
-	// wiring the composition root relies on.
-	svc := lifecycle.Service{Name: "storage", Stage: 0, Start: s.Start, Shutdown: s.Shutdown, Check: s}
-
-	if svc.Check.Ready() {
-		t.Error("Check.Ready() = true before Start, want false")
-	}
-	if err := svc.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	if !svc.Check.Ready() {
-		t.Error("Check.Ready() = false after Start, want true")
-	}
-	if err := svc.Shutdown(context.Background()); err != nil {
-		t.Fatalf("Shutdown: %v", err)
-	}
-	if svc.Check.Ready() {
-		t.Error("Check.Ready() = true after Shutdown, want false")
 	}
 }
 
