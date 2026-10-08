@@ -29,16 +29,31 @@
 // gates it on [Store.Start] and [Store.Shutdown], and enforces the limits
 // [Store.Put] states. [Store.Ready] probes the provider live, so readiness
 // drops during an outage and recovers with the provider. [Store.Container]
-// returns the configured container name. A composition root registers the
-// Store with go-core's lifecycle package:
+// returns the configured container name.
 //
-//	lc.Add(lifecycle.Service{
-//		Name:     "storage",
-//		Stage:    0,
-//		Start:    store.Start,
-//		Shutdown: store.Shutdown,
-//		Check:    store,
+// A composition root defines the Store as a node of a go-core graph and
+// hands the built System to a lifecycle Coordinator. The Store is a
+// lifecycle Starter, Stopper, and ReadinessChecker, so the Coordinator
+// starts it in its layer, checks it for readiness under the node's name,
+// and shuts it down, all inferred from its methods with no adapter:
+//
+//	g := graph.New()
+//	store := g.Define("storage", func(*graph.Scope) (*storage.Store, error) {
+//		client, err := azureblob.New(cfg)
+//		if err != nil {
+//			return nil, err
+//		}
+//		return storage.New(client, cfg), nil
 //	})
+//	// The nodes that read or write objects call s.Use(store).
+//	sys, err := g.Build(roots...)
+//	if err != nil {
+//		return err
+//	}
+//	return lifecycle.New(sys, lifecycleCfg).Run(ctx)
+//
+// The Coordinator also calls Shutdown after a failed Start, which the Store
+// handles: Shutdown is safe before Start and after a failed Start.
 //
 // # Configuration
 //

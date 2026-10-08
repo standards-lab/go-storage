@@ -7,6 +7,17 @@ only; each provider sub-module keeps its own.
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-10-08
+
+### Changed
+
+- **Breaking:** The `go-core` requirement is v0.6.0. An importer still on `lifecycle.Service`,
+  `Add`, or stages breaks, since the requirement pulls v0.6.0 into its build.
+- `*Store` joins a graph-backed `lifecycle.Coordinator` as a node's value: the Coordinator
+  infers from its methods that it is a `Starter`, a `Stopper`, and a `ReadinessChecker`, so it
+  needs no adapter. Under the Coordinator, `Shutdown` also follows a failed `Start`, which
+  `Store` already handles safely.
+
 ## [v0.4.0] - 2026-09-30
 
 ### Added
@@ -139,7 +150,8 @@ only; each provider sub-module keeps its own.
   entity-tag form and equal across `Put`, `Get`, `Stat`, and `List`. `Fake` enforces `Size`
   and reports a quoted ETag.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.5.0...HEAD
+[v0.5.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.5.0
 [v0.4.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.3.0
 [v0.2.1]: https://github.com/standards-lab/go-storage/releases/tag/v0.2.1
