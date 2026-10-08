@@ -35,8 +35,7 @@
 // hands the built System to a lifecycle Coordinator. The Store is a
 // lifecycle Starter, Stopper, and ReadinessChecker, so the Coordinator
 // starts it in its layer, shuts it down, and lists its readiness among its
-// Checks under the node's name, all inferred from its methods with no
-// adapter:
+// Checks under the node's name. The Store needs no adapter:
 //
 //	g := graph.New()
 //	store := g.Define("storage", func(*graph.Scope) (*storage.Store, error) {
