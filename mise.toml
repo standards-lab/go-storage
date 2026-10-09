@@ -8,7 +8,7 @@ jq = "1.8.2"
 # use-list. "." is the base module; provider sub-modules are added as they
 # are built.
 [env]
-GO_MODULES = ". azureblob"
+GO_MODULES = ". azureblob s3"
 
 [tasks.check]
 description = "Build, vet, format, fix, tidy, test, and lint every module; writes nothing"
