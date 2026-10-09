@@ -24,7 +24,9 @@ changelog covers this sub-module only; the base module keeps its own.
   completion, and the caller's cancellation midway, which maps to no sentinel.
 - Error classification into the base module's sentinels in the dual-wrap form.
 - Acceptance tests that run the `storagetest` conformance suite and a `storage.Store.Start`
-  against a real gateway, gated on `S3_TEST_ENDPOINT` so they skip on the unit tier.
+  against a real gateway, gated on `S3_TEST_ENDPOINT` so they skip on the unit tier. They run
+  locally with `mise run acceptance:s3`, against SeaweedFS built from
+  `compose/seaweedfs/Dockerfile`, the same task CI runs.
 - The `try_timeout` option: a positive Go duration that bounds each try of a request, a Get's
   body read included, through the HTTP client's timeout. A stalled try is retried up to
   `max_retries` times, and a request whose every try stalls fails with `storage.ErrUnavailable`.
