@@ -207,11 +207,11 @@ func (b *bodyReader) Read(p []byte) (int, error) {
 // Get opens the object at key with one GetObject request and returns a
 // body that resumes after a failed read, as the try_timeout entry in the
 // package documentation describes. NoSuchKey is storage.ErrNotFound and
-// NoSuchBucket storage.ErrContainerNotFound, as classify maps them. The
-// body classifies a read's failure with classifyRead: a try's deadline or a
-// lost connection is storage.ErrUnavailable, and an object deleted or
-// replaced before a resumption is storage.ErrNotFound, since the version
-// being read is gone.
+// NoSuchBucket storage.ErrContainerNotFound, as classify maps them. A
+// failed read of the body is classified the same way, a try's deadline or
+// a lost connection as storage.ErrUnavailable, and an object deleted or
+// replaced before a resumption is storage.ErrNotFound, as classifyResume
+// maps it, since the version being read is gone.
 func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (storage.Blob, error) {
 	if err := validateKey(key); err != nil {
 		return storage.Blob{}, err
@@ -254,10 +254,11 @@ var errBodyClosed = errors.New("s3: read of a closed Get body")
 // retries times before it returns the failure; a resumption's own
 // GetObject is retried by the SDK as any request is.
 //
-// It does not resume when the caller's context is done, after Close, when the first answer carried no ETag to condition on, or when
-// the failure came at or after the last byte, where the only failure left
-// is the SDK's checksum check of a complete body. A failure it returns is
-// returned again on every later Read.
+// It does not resume when the caller's context is done, after Close, when
+// the first answer carried no ETag to condition on, or when the failure
+// came at or after the last byte, where the only failure left is the SDK's
+// checksum check of a complete body. A failure it returns is returned again
+// on every later Read.
 //
 // The SDK validates a checksum only at the end of a whole object's body,
 // so a read that resumes is not checked; the package documentation says
@@ -353,7 +354,7 @@ func (b *resumingBody) resume() (io.ReadCloser, error) {
 		IfMatch: aws.String(b.etag),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("s3: resume read of %q at byte %d: %w", b.key, b.offset, classifyRead(err))
+		return nil, fmt.Errorf("s3: resume read of %q at byte %d: %w", b.key, b.offset, classifyResume(err))
 	}
 	if want := fmt.Sprintf("bytes %d-", b.offset); !strings.HasPrefix(aws.ToString(out.ContentRange), want) {
 		_ = out.Body.Close()
@@ -376,14 +377,14 @@ func (b *resumingBody) Close() error {
 	return nil
 }
 
-// classifiedBody classifies a Get body's read failures with classifyRead
-// and passes io.EOF through unchanged.
+// classifiedBody classifies a Get body's read failures with classify and
+// passes io.EOF through unchanged.
 type classifiedBody struct{ io.ReadCloser }
 
 func (b classifiedBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
 	if err != nil && err != io.EOF {
-		err = classifyRead(err)
+		err = classify(err)
 	}
 	return n, err
 }
