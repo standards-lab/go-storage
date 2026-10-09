@@ -1,6 +1,6 @@
 # goal · storage-s3
 
-- **State:** building
+- **State:** brief ready
 - **Task:** hardening
 - **Branch:** hardening
 
