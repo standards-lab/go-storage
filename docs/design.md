@@ -9,7 +9,7 @@ No formal standard exists for object storage, so the standard tier is derived fr
 target APIs, Azure Blob Storage and Amazon S3, share, and kept narrow. An interface is the least
 reversible thing a library ships: every provider implements it, and widening it breaks each one.
 The tier becomes a validated standard only once a second provider passes the `storagetest` suite.
-Until then it is a proposal, with `azureblob` its only provider.
+Until then it is a proposal.
 
 Object storage is protocol-driven, not DSL-driven: a consumer calls operations with typed
 arguments, and there is no text artifact and no dialect.
