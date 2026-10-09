@@ -1,12 +1,12 @@
 # goal · storage-s3
 
-- **State:** building
-- **Task:** port
-- **Branch:** port
+- **State:** idle
+- **Task:** none
+- **Branch:** none
 
 ## Tasks
 
-1. [ ] port
+1. [x] port
 2. [ ] hardening
 
 ## Task brief · port
@@ -56,10 +56,6 @@ Out of scope  hardening's work (per-try deadline, resuming Get body, concurrency
 Door          two-way: nothing is tagged; the module, tasks, and CI step revert
               with the merge
 ```
-
-## Progress
-
-- port: approved 2026-10-09; slices 1–4 committed (c5138a1, 2b2d778, b025401, b1b7197); reviews and editor pass done; next: brief.
 
 ## Decisions
 
