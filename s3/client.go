@@ -28,9 +28,9 @@ const (
 // The part_size option's default and bounds. S3 refuses a part, the last
 // one excepted, below 5 MiB, and any part above 5 GiB.
 const (
-	defaultPartSize = 8 << 20
-	minPartSize     = 5 << 20
-	maxPartSize     = 5 << 30
+	defaultPartSize int64 = 8 << 20
+	minPartSize     int64 = 5 << 20
+	maxPartSize     int64 = 5 << 30
 )
 
 // abortTimeout bounds the AbortMultipartUpload that follows a failed
@@ -154,7 +154,7 @@ func partSizeOption(options map[string]string) (int64, error) {
 	}
 	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil || n < minPartSize || n > maxPartSize {
-		return 0, fmt.Errorf("s3: option %s: %q is not a byte count from %d (5 MiB) to %d (5 GiB)", optionPartSize, v, int64(minPartSize), int64(maxPartSize))
+		return 0, fmt.Errorf("s3: option %s: %q is not a byte count from %d (5 MiB) to %d (5 GiB)", optionPartSize, v, minPartSize, maxPartSize)
 	}
 	return n, nil
 }
