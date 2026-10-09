@@ -124,10 +124,9 @@
 // when the answer carries one, only once the whole object's body has been
 // read; a ranged answer carries none for the object. A read that resumes
 // is therefore not validated by checksum, neither the bytes before the
-// resumption nor those after it. [Client.Stat] sends
-// HeadObject. [Client.Delete] sends DeleteObject, which S3 answers with
-// success for a missing key. [Client.List] sends ListObjectsV2, one page per
-// call.
+// resumption nor those after it. [Client.Stat] sends HeadObject.
+// [Client.Delete] sends DeleteObject, which S3 answers with success for a
+// missing key. [Client.List] sends ListObjectsV2, one page per call.
 //
 // Every operation reports the ETag in HTTP entity-tag form, adding the
 // quotes to a value a gateway sends without them, so Put, Get, Stat, and
@@ -158,9 +157,9 @@
 // failure is, but for one case: an object replaced before a resumption
 // fails the resumption's If-Match with 412 PreconditionFailed, which
 // matches storage.ErrNotFound, as a deleted object's NoSuchKey does,
-// because the version being read is gone. A 5xx answer, the SlowDown, ServiceUnavailable, and
-// InternalError codes, and a failure with no response, an expired deadline
-// included, match storage.ErrUnavailable.
+// because the version being read is gone. A 5xx answer, the SlowDown,
+// ServiceUnavailable, and InternalError codes, and a failure with no
+// response, an expired deadline included, match storage.ErrUnavailable.
 // The caller's cancellation and every other answer, an authentication
 // failure included, pass through unclassified.
 //
@@ -171,10 +170,10 @@
 // storagetest.RunMissingContainer, storage.Store.Start, Probe,
 // EnsureContainer, the object operations, multipart Put's visibility and
 // abort, at 5 MiB parts, and a Get body's resumption past try_timeout and
-// its failure when the object is replaced mid-read, against a real gateway when
-// S3_TEST_ENDPOINT names its URL, each in a bucket of its own, with the
-// access key admin and the secret secret. The repository's mise tasks start
-// SeaweedFS with those credentials and run them:
+// its failure when the object is replaced mid-read, against a real gateway
+// when S3_TEST_ENDPOINT names its URL, each in a bucket of its own, with
+// the access key admin and the secret secret. The repository's mise tasks
+// start SeaweedFS with those credentials and run them:
 //
 //	mise run seaweedfs:start
 //	mise run acceptance
