@@ -1,6 +1,6 @@
 # goal · storage-s3
 
-- **State:** brief ready
+- **State:** building
 - **Task:** hardening
 - **Branch:** hardening
 
@@ -11,85 +11,87 @@
 
 ## Task brief · hardening
 
-Repositories: go-storage (root), sqlate, blobfs, go-web-service; branch `hardening` in each.
+Repositories: go-storage (root), go-core, sqlate, go-database, go-observability, go-web-sdk,
+go-web-sdk-template, blobfs, go-web-service — branch `hardening` in each (the five new ones
+branch from main on approval; all on main and clean, no other goal locks them).
 
 ```
-## Task brief · storage-s3 · hardening (revised at BRIEF)
-Problem       s3 falls short of azureblob's provider bar (slices 1–6, built).
-              And the workspace has no convention for test and dev containers:
-              go-storage starts SeaweedFS with a shell script and Azurite with an
-              inline loop, azureblob has no local task, image pins live on
-              image: lines CI duplicates, and task names mix db-up with
-              seaweedfs:start.
-Behaviors     1–9. As approved (try_timeout; resuming Get; 412/deleted ->
-                 ErrNotFound; stalled -> ErrUnavailable; concurrency and stated
-                 bounds; "s3:" prefix; SeaweedFS acceptance of resumption; docs;
-                 changelogs dated for s3/v0.1.0 and azureblob/v0.5.0).
-              10. Every compose service in go-storage, sqlate, blobfs, and
-                 go-web-service builds from a Dockerfile at
-                 compose/<service>/Dockerfile under a root compose.yml; its FROM
-                 line is the service's one image pin; its configuration is
-                 COPY'd in; where the base image can run a probe, a HEALTHCHECK
-                 in the Dockerfile defines readiness (distroless images have
-                 none and are waited on as running).
-              11. Stacks start with `docker compose up -d --wait --build` and
-                 stop with `docker compose down`; a test-only harness
-                 (go-storage's) keeps data on tmpfs, so every start is empty;
-                 development stacks keep named volumes that <stack>:down keeps
-                 and <stack>:reset deletes.
-              12. Multi-part mise tasks are named <group>:<member> with a colon,
-                 group first, in all four repositories (db:up, db:down,
-                 db:reset, db:state, otel:*, stack:*, acceptance:s3,
-                 acceptance:azureblob); go-storage's seaweedfs:* retire; no doc,
-                 test comment, or workflow names an old task.
-              13. go-storage: `mise run acceptance` (every provider) and
-                 acceptance:s3 / acceptance:azureblob each bring their service
-                 up healthy, run that module's tests with its endpoint set, and
-                 tear down pass or fail; azureblob runs locally for the first
-                 time. No shell script backs the harness.
-              14. Each repository's CI job that needs containers runs the same
-                 mise task a developer runs, with container logs on failure.
-              15. Each repository's currency reports a Dockerfile FROM pin that
-                 trails, and ignores build-only compose services; currency exits
-                 0 in all four.
-              16. READMEs, package docs, compose READMEs, STANDARDS.md, and
-                 changelogs describe the tasks and the convention.
-Test seams    as approved; plus each repository's mise tasks against Docker
-              (acceptance, integration, db:up), mise run check and currency
-Slices        1–6. committed (go-storage)
-              7. upgrade sqlate: go 1.27.2; currency exits 0, check passes
-              8. upgrade blobfs: go 1.27.2, x/text v0.43.0, example on
-                 go-storage v0.5.0; currency exits 0, check passes
-              9. upgrade go-web-service: slab x/sys v0.49.0, x/term v0.47.0;
-                 currency exits 0, check passes
-              10. go-storage harness: SeaweedFS and Azurite Dockerfiles,
-                 compose.yml, acceptance tasks, currency FROM scan, script
-                 retired; demo: acceptance green for s3 and azureblob locally
-              11. go-storage CI and docs: the acceptance job runs mise run
-                 acceptance; README, both doc.go, STANDARDS.md; demo: the PR's
-                 acceptance job green
-              12. sqlate convention: postgres Dockerfile, db:* tasks, currency,
-                 CI, docs; demo: db:up healthy, live tests green
-              13. blobfs convention: postgres and Azurite Dockerfiles, tasks,
-                 currency, CI, docs; demo: acceptance green
-              14. go-web-service convention: postgres, Azurite, otel collector,
-                 loki, tempo, mimir, grafana Dockerfiles with configs COPY'd;
-                 db:/otel:/stack: tasks; integration task and CI job; currency;
-                 docs, slab docs, test comments; demo: integration green,
-                 stack:up healthy
-              15. release re-check: both changelogs and module docs current;
-                 check green in all four
-Out of scope  a base go-storage release; tags in sqlate, blobfs, go-web-service;
-              Put's buffering; transfermanager's log output; archived spikes'
-              task names; spike-model-hosting; architecture-page edits (sync)
-Door          two-way through slice 15 (images, tasks, CI revert with the
-              merges); one-way at SHIP for the tags
-Release       s3/v0.1.0, azureblob/v0.5.0
+## Task brief · storage-s3 · hardening (revised at BRIEF, second time)
+Problem       As before (s3 at the provider bar; one container convention). And
+              time.Time values leave the workspace's libraries in whatever
+              Location their source picked: pgx returns Postgres's UTC instants
+              in the host's zone, azureblob's Put/Get/Stat return a GMT zone (or
+              Local on GMT-abbreviated hosts) while its List returns UTC, go-core
+              logs in the host zone. JSON, cursors, logs, and == then depend on
+              the host. Postgres already stores UTC; the read side doesn't.
+Behaviors     1–16. As approved (provider bar; container convention; task names).
+              17. Every time.Time a workspace library returns is in time.UTC,
+                 whatever the process's TZ: azureblob and s3 Put/Get/Stat/List;
+                 sqlate's Scanner and Scalar; go-database/postgres connections
+                 (pgx ScanLocation UTC); blobfs and go-web-service reads through
+                 them. Tests compare whole values against UTC and run under
+                 TZ=Europe/London (a GMT-abbreviated zone).
+              18. go-storage's contract documents ModifiedAt as UTC; the Fake
+                 stamps UTC; the conformance suite checks Location.
+              19. sqlate's migration history records applied_at as timestamp with
+                 time zone; an existing history table is altered on the next
+                 migrate, and its rows keep their instants.
+              20. go-core's slog handlers write record times in UTC.
+              21. Every repository's currency exits 0 at SHIP: each layer bumps to
+                 the layer below's new tags before its own merge and tags.
+              22. Changelogs record each release; architecture-layer edits wait
+                 for sync.
+Test seams    as approved; plus each library's exported read API under
+              TZ=Europe/London; sqlate's migrator against an existing history
+              table; go-core's logger output
+Slices        1–14. committed
+              15. upgrade go-core: Go 1.27.2
+              16. upgrade go-database: Go 1.27.2, go-core v0.6.0 (absorb its
+                 removed lifecycle.Service/Add/stages, docs included)
+              17. upgrade go-observability: Go 1.27.2, go-core v0.6.0
+              18. upgrade go-web-sdk: Go 1.27.2, rate-limit on go-web-sdk v0.15.0
+              19. go-core: UTC log times; changelog for v0.7.0
+              20. sqlate: Scanner/Scalar UTC; history applied_at timestamptz with
+                 in-place alter; changelogs for v0.5.0, postgres/v0.5.0,
+                 sqlint/v0.2.2
+              21. go-storage: azureblob and s3 UTC (List comment corrected),
+                 contract, Fake, suite; changelogs: base v0.6.0, azureblob v0.5.0
+                 gains a Fixed entry and the v0.6.0 requirement, s3 v0.1.0 likewise
+              22. go-database/postgres: ScanLocation UTC; changelogs for v0.8.0,
+                 postgres/v0.5.0
+              23. release prep in go-observability, go-web-sdk, blobfs,
+                 go-web-sdk-template: changelog sections for their tags
+              24. re-check: check, currency (against main's tags), and container
+                 tasks green in every touched repository
+              SHIP walks `order` layer by layer: go-core, sqlate → (bump) go-database,
+              go-web-sdk, go-observability, go-storage (base, then providers), blobfs →
+              (bump) go-web-sdk-template → (bump) go-web-service; each layer merges, passes
+              ci, tags, then the next bumps.
+Out of scope  Put's buffering; transfermanager's log output; archived spikes;
+              spike-model-hosting; claude-plugins; architecture-page edits (sync);
+              a go-core clock abstraction (callers convert with .UTC())
+Door          two-way through slice 24; one-way at SHIP: every tag below is
+              pinned by the module proxy and checksum database
+Release       go-core v0.7.0
+              sqlate v0.5.0, postgres/v0.5.0, sqlint/v0.2.2
+              go-database v0.8.0, postgres/v0.5.0
+              go-observability v0.2.0, otlp/v0.2.0
+              go-web-sdk v0.15.1, middleware/rate-limit/v0.2.1
+              go-storage v0.6.0, azureblob/v0.5.0, s3/v0.1.0
+              blobfs v0.6.0, postgres/v0.4.0
+              go-web-sdk-template template/v0.3.1
 ```
+
+Version rule applied (for approval with the Release line): minor where returned times change
+(go-core, sqlate, sqlate/postgres, go-database/postgres, go-storage base, blobfs and
+blobfs/postgres through sqlate) or where a breaking requirement is pulled into importers
+(go-database and go-observability off go-core v0.5.0, otlp through it — precedent:
+azureblob's go-storage v0.5.0 entry); patch where only a non-breaking requirement moves
+(sqlint, go-web-sdk, rate-limit, template). go-web-service is an application: no tag.
 
 ## Progress
 
-slices 15/15 (15 folded into validation) committed (go-storage: d3b165f, 8afbb0d, 13179c2, 4c12efe, 22fc733, 445b840, 521f571, 341cd14; reviews and editor on 1–6: a911618, 82e23f5, 31a5d12; sqlate: a6e772f, 87b176d; blobfs: 3e5290f, 45c1260; go-web-service: ef628fe, b5695a1) · standards ✓ (1–6: a911618, 82e23f5; 7–14: go-storage ca2c079, 55b54bf; sqlate e62e867, c849e1c; blobfs 300d812, a5f53d7; go-web-service 66c2996) · spec ✓ (10–16 gaps closed: go-storage 967c7fc, go-web-service aac8083; PR CI pending at SHIP) · editor ✓
+slices 14/24 committed (go-storage: d3b165f, 8afbb0d, 13179c2, 4c12efe, 22fc733, 445b840, 521f571, 341cd14; sqlate: a6e772f, 87b176d; blobfs: 3e5290f, 45c1260; go-web-service: ef628fe, b5695a1) · reviews of 1–14: standards ✓, spec ✓, editor ✓ · reviews of 15–24: standards — · spec — · editor —
 
 ## Decisions
 
@@ -148,12 +150,20 @@ slices 15/15 (15 folded into validation) committed (go-storage: d3b165f, 8afbb0d
 - hardening: blobfs's example takes go-storage v0.5.0 while go-storage/azureblob stays at v0.4.0, its latest tag until SHIP.
 - hardening: the upgrade slices add no CHANGELOG entries, since the changelogs record library behavior; sqlate's go directives stay 1.27, as the minor has not moved; go-web-service's slab bump is a targeted go get, not the full upgrade sweep.
 - hardening: sqlate's and blobfs's CHANGELOGs gain no entry for the stack, which is development-only; go-web-service's Unreleased Changed records it; go-storage records the local harness in azureblob v0.5.0 and s3 v0.1.0, not in the base CHANGELOG.
+- hardening (second redirect at BRIEF): every time.Time a workspace library returns is in time.UTC, so JSON, cursors, logs, and == don't depend on the host; Postgres already stores timestamptz (UTC), so the work is on the read side.
+- hardening: azureblob's Put/Get/Stat (GMT zone, or Local on GMT-abbreviated hosts) and s3's header paths convert to UTC before the tags; List's comment, which claimed they agreed, is corrected.
+- hardening: go-storage's contract documents ModifiedAt as UTC, the Fake stamps UTC, and the conformance suite checks Location, released as base v0.6.0 that both providers require.
+- hardening: database reads become UTC in two places: go-database/postgres sets pgx's TimestamptzCodec.ScanLocation to UTC on its connections, and sqlate's Scanner and Scalar convert any time.Time to UTC whatever driver produced it; a session TimeZone setting was ruled out because pgx ignores it when decoding.
+- hardening: sqlate's history applied_at becomes timestamp with time zone, existing tables altered on the next migrate.
+- hardening: go-core's slog handlers write UTC record times.
+- hardening: versions are minor where returned times change or where a breaking requirement (go-core v0.6.0) is pulled into importers, patch where only a non-breaking requirement moves; go-web-service, an application, takes no tag.
+- hardening: SHIP walks the coordinator's order layer by layer; each layer bumps to the layer below's new tags, merges, passes ci, and tags before the next (architect: the session carries every currency update its releases cause).
+- hardening: no go-core clock abstraction; callers convert with .UTC().
 
 ## Pending edits
 
 - coordinator · roadmap: consider a backlog goal for s3 `Put`'s memory: transfermanager copies the first part out of `Put`'s decision buffer unpooled, and for an unknown size that buffer grows by doubling, so a multipart `Put` holds part_size × (concurrency + 3) or (concurrency + 4) while it starts, against the part_size × (concurrency + 2) it reads ahead (56 and 64 MiB against 48 MiB at the defaults).
 - coordinator · roadmap: consider a backlog goal for transfermanager's standard-library `log` output when a multipart upload's completion fails, which bypasses the application's logger.
-- coordinator · roadmap: consider a backlog goal for azureblob's `ModifiedAt` locations: `List` converts `ModifiedAt` to UTC, while `Put`, `Get`, and `Stat` report the GMT location their response headers parse to (raised at df2c829, azcore v1.23.3; azcore v1.23.2 fixed RFC 7231 times to a GMT zone). The instants are equal but the `Location`s differ, so the comment in azureblob/objects.go's `List` ("UTC keeps List's ModifiedAt identical to the one Put, Get, and Stat report") is wrong. It ships in azureblob/v0.5.0.
 - coordinator · roadmap: consider a backlog goal for go-web-service's application settings to follow `POSTGRES_PORT` and `AZURITE_BLOB_PORT`, as sqlate's `SQLATE_DSN` and blobfs's `BLOBFS_DSN` and `BLOBFS_STORAGE_ENDPOINT` now do. Its README documents that moving a port splits the two until `APP_DATABASE_PORT` or `APP_STORAGE_ENDPOINT` follows.
 - coordinator · references.toml: under the archived spikes, after `[repos.spike-cli-architecture]`, add `[repos.spike-s3-storage]` with `remote = "https://github.com/JaimeStill/spike-s3-storage.git"` and `archived = true`.
 - coordinator · references.md, "Experiments — archived spikes": add `### spike-s3-storage`: "Asked whether go-storage's `Client` interface holds over S3, with an aws-sdk-go-v2 provider validated against SeaweedFS's S3 gateway, and whether the blobfs CLI runs unchanged on it. Its `s3` module became go-storage's `s3` provider."
