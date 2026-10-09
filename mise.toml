@@ -54,12 +54,12 @@ docker compose up -d --wait --build seaweedfs
 
 [tasks."acceptance:azureblob"]
 description = "Run the azureblob module's tests, acceptance included, against a fresh Azurite"
-env = { GOWORK = "off", AZUREBLOB_TEST_ENDPOINT = "http://127.0.0.1:10000/devstoreaccount1" }
+env = { GOWORK = "off" }
 run = '''
 set -e
 trap 'rc=$?; [ $rc -eq 0 ] || docker compose logs azurite; docker compose down azurite; exit $rc' EXIT
 docker compose up -d --wait --build azurite
-(cd azureblob && go test -race -count=1 -v ./...)
+(cd azureblob && AZUREBLOB_TEST_ENDPOINT="http://127.0.0.1:${AZURITE_BLOB_PORT:-10000}/devstoreaccount1" go test -race -count=1 -v ./...)
 '''
 
 # One provider at a time, every provider even after one fails.

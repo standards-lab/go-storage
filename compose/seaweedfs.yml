@@ -4,5 +4,4 @@ services:
       context: seaweedfs
     ports:
       - "127.0.0.1:${SEAWEEDFS_PORT:-8333}:8333"
-    # Data lives in memory, so every start begins empty.
     tmpfs: /data

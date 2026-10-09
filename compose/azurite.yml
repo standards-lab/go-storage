@@ -3,6 +3,5 @@ services:
     build:
       context: azurite
     ports:
-      - "127.0.0.1:10000:10000"
-    # Data lives in memory, so every start begins empty.
+      - "127.0.0.1:${AZURITE_BLOB_PORT:-10000}:10000"
     tmpfs: /data

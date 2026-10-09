@@ -70,8 +70,9 @@ The unit tests need no service. Each provider's acceptance tests run the conform
 a real service when its endpoint variable is set, and skip otherwise: `azureblob`'s read
 `AZUREBLOB_TEST_ENDPOINT` and `s3`'s read `S3_TEST_ENDPOINT`. The acceptance harness is a compose
 stack with one service per provider, Azurite and SeaweedFS, each keeping its data in memory. Each
-service's image is defined by `compose/<service>/Dockerfile`, whose `FROM` line is its one pin, and
-CI runs the same `acceptance` task:
+service's image is defined by `compose/<service>/Dockerfile`, whose `FROM` line is its one pin;
+`SEAWEEDFS_PORT` and `AZURITE_BLOB_PORT` move the published ports off 8333 and 10000, and the
+acceptance tasks' endpoints follow them. CI runs the same `acceptance` task:
 
 ```
 mise run up                    # start every harness service and wait until each is healthy

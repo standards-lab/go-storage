@@ -1,6 +1,8 @@
 # go-storage's test-only harness: one service per provider whose acceptance
-# tests need a real server. Each builds from compose/<service>/Dockerfile,
-# which pins its image and carries its configuration and health check.
+# tests need a real server. Each service builds from
+# compose/<service>/Dockerfile, which pins its image and carries its
+# configuration and health check. Each keeps its data in tmpfs, so every start
+# begins empty.
 name: go-storage
 
 include:
