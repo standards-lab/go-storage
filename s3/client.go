@@ -22,10 +22,11 @@ import (
 // The Options keys this package reads. See the package documentation for
 // their values.
 const (
-	optionRegion     = "region"
-	optionMaxRetries = "max_retries"
-	optionPartSize   = "part_size"
-	optionTryTimeout = "try_timeout"
+	optionRegion      = "region"
+	optionMaxRetries  = "max_retries"
+	optionPartSize    = "part_size"
+	optionTryTimeout  = "try_timeout"
+	optionConcurrency = "concurrency"
 )
 
 // The part_size option's default and bounds. S3 refuses a part, the last
@@ -34,6 +35,13 @@ const (
 	defaultPartSize int64 = 8 << 20
 	minPartSize     int64 = 5 << 20
 	maxPartSize     int64 = 5 << 30
+)
+
+// The concurrency option's default and bounds: how many parts of one
+// multipart upload are in flight at once.
+const (
+	defaultConcurrency = 4
+	maxConcurrency     = 32
 )
 
 // abortTimeout bounds the AbortMultipartUpload that follows a failed
@@ -97,6 +105,10 @@ func New(cfg storage.Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	concurrency, err := concurrencyOption(cfg.Options)
+	if err != nil {
+		return nil, err
+	}
 
 	// awss3.New, unlike config.LoadDefaultConfig, loads no shared config or
 	// credentials file and takes none of these options from the
@@ -129,11 +141,15 @@ func New(cfg storage.Config) (*Client, error) {
 	// The threshold equal to the part size makes transfermanager take any
 	// body of at least one part as a multipart upload; Put sends a smaller
 	// one as a PutObject itself, so it only hands over a body longer than
-	// a part. FailTimeout gives the abort after a failure a fresh context,
-	// so the caller's cancellation does not cancel the abort too.
+	// a part. Concurrency is the number of workers that send parts, so it
+	// bounds the UploadPart requests in flight; transfermanager also keeps
+	// a pool of Concurrency+1 part buffers for them. FailTimeout gives the
+	// abort after a failure a fresh context, so the caller's cancellation
+	// does not cancel the abort too.
 	uploader := transfermanager.New(client, func(o *transfermanager.Options) {
 		o.PartSizeBytes = partSize
 		o.MultipartUploadThreshold = partSize
+		o.Concurrency = concurrency
 		o.FailTimeout = abortTimeout
 	})
 	return &Client{
@@ -212,6 +228,20 @@ func tryTimeoutOption(options map[string]string) (time.Duration, error) {
 		return 0, fmt.Errorf("s3: option %s: %q is not a positive duration", optionTryTimeout, v)
 	}
 	return d, nil
+}
+
+// concurrencyOption reads the concurrency option as an integer from 1 to
+// maxConcurrency, applying the default for an unset key.
+func concurrencyOption(options map[string]string) (int, error) {
+	v, ok := options[optionConcurrency]
+	if !ok {
+		return defaultConcurrency, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > maxConcurrency {
+		return 0, fmt.Errorf("s3: option %s: %q is not an integer between 1 and %d", optionConcurrency, v, maxConcurrency)
+	}
+	return n, nil
 }
 
 // validateEndpoint reports whether endpoint is an absolute http or https

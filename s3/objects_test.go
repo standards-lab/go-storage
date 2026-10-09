@@ -398,6 +398,88 @@ func TestPut_LongerThanAPartIsAMultipartUpload(t *testing.T) {
 	}
 }
 
+// inFlight counts the UploadPart requests a scripted service is answering at
+// once and keeps the most it has seen.
+type inFlight struct {
+	mu      sync.Mutex
+	now     int
+	most    int
+	reached chan struct{} // closed once now first reaches want
+	want    int
+}
+
+// part answers an UploadPart as multipart's default does, after holding it.
+// Each part is held until want parts are in flight together, so the count
+// reaches want if the client allows it, and then a while longer, so a
+// client that allows more than want sends them while these are held. A
+// client that never reaches want has each part released after a timeout,
+// so the test fails rather than hangs.
+func (f *inFlight) part(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.now++
+	f.most = max(f.most, f.now)
+	if f.now == f.want {
+		select {
+		case <-f.reached:
+		default:
+			close(f.reached)
+		}
+	}
+	f.mu.Unlock()
+
+	select {
+	case <-f.reached:
+		time.Sleep(100 * time.Millisecond)
+	case <-time.After(2 * time.Second):
+	}
+
+	f.mu.Lock()
+	f.now--
+	f.mu.Unlock()
+	w.Header().Set("ETag", `"part-`+r.URL.Query().Get("partNumber")+`"`)
+	w.WriteHeader(http.StatusOK)
+}
+
+// The concurrency option bounds the UploadPart requests of one Put in
+// flight at once, and a Put reaches it: unset means 4. The body has more
+// parts than transfermanager's own default of 5 workers, so an option that
+// did not reach transfermanager shows as more parts in flight than it
+// allows.
+func TestPut_ConcurrencyBoundsThePartsInFlight(t *testing.T) {
+	const parts = 7
+	for name, tc := range map[string]struct {
+		option string
+		want   int
+	}{
+		"1":     {"1", 1},
+		"2":     {"2", 2},
+		"unset": {"", 4},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &inFlight{want: tc.want, reached: make(chan struct{})}
+			etag := fmt.Sprintf(`"0123456789abcdef0123456789abcdef-%d"`, parts)
+			svc := newService(t, multipart{etag: etag, part: f.part}.handler())
+			options := map[string]string{"part_size": strconv.Itoa(testPartSize)}
+			if tc.option != "" {
+				options["concurrency"] = tc.option
+			}
+			c := newClient(t, testConfig(t, svc.endpoint(), options))
+
+			if _, err := c.Put(t.Context(), "k", bytes.NewReader(make([]byte, parts*testPartSize)), storage.PutOptions{}); err != nil {
+				t.Fatalf("Put = %v, want nil", err)
+			}
+			if got := count(operations(svc.Requests()), "UploadPart"); got != parts {
+				t.Fatalf("service saw %d UploadParts, want %d", got, parts)
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.most != tc.want {
+				t.Errorf("most UploadParts in flight at once = %d, want %d", f.most, tc.want)
+			}
+		})
+	}
+}
+
 // A multipart upload that fails, through its body, a size mismatch, a part,
 // or the completion, returns the failure and aborts the upload: once by
 // transfermanager and once more by Put. Nothing is completed.

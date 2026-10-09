@@ -143,6 +143,26 @@ func TestNew_AcceptsPartSizeBounds(t *testing.T) {
 	}
 }
 
+// concurrency takes an integer from 1 to 32.
+func TestNew_RejectsBadConcurrency(t *testing.T) {
+	for _, v := range []string{"0", "33", "-1", "x", "", "1.5", "4 "} {
+		t.Run(v, func(t *testing.T) {
+			_, err := s3.New(testConfig(t, "http://127.0.0.1:8333", map[string]string{"concurrency": v}))
+			if err == nil || !strings.Contains(err.Error(), "concurrency") {
+				t.Fatalf("New = %v, want an error naming concurrency", err)
+			}
+		})
+	}
+}
+
+func TestNew_AcceptsConcurrencyBounds(t *testing.T) {
+	for _, v := range []string{"1", "32"} {
+		if _, err := s3.New(testConfig(t, "http://127.0.0.1:8333", map[string]string{"concurrency": v})); err != nil {
+			t.Errorf("New with concurrency %s = %v, want nil", v, err)
+		}
+	}
+}
+
 func TestNew_RejectsEmptyRegion(t *testing.T) {
 	_, err := s3.New(testConfig(t, "http://127.0.0.1:8333", map[string]string{"region": ""}))
 	if err == nil || !strings.Contains(err.Error(), "region") {

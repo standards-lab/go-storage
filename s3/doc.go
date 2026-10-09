@@ -70,10 +70,27 @@
 //     its resumptions are spent. try_timeout must exceed the longest part
 //     upload, and the time a Get body's reader may pause between reads
 //     without spending a resumption.
+//   - concurrency: the number of parts of one multipart upload in flight
+//     at once, from 1 to 32. Unset means 4.
 //
 // A malformed value is a construction error. The SDK's default checksum
 // behavior is kept: a request carries a checksum when the operation
 // supports one.
+//
+// A multipart Put reads at most part_size × (concurrency + 2) bytes of its
+// body ahead of the parts the service has acknowledged, 48 MiB at the
+// defaults: transfermanager's concurrency + 1 part buffers and its copy of
+// the first part. It holds more in memory while it starts: Put's own buffer
+// of part_size + 1 bytes, which decides between one PutObject and a
+// multipart upload, is still held when transfermanager has copied the
+// first part out of it and allocated its part buffers, so a Put holds up
+// to part_size × (concurrency + 3) bytes, 56 MiB at the defaults. For a
+// body of unknown size that buffer grows by doubling, to as much as twice
+// its length, so such a Put holds up to part_size × (concurrency + 4)
+// bytes, 64 MiB at the defaults. Once the first part is sent, a Put holds
+// its concurrency + 1 part buffers. A declared Size beyond 10,000 parts
+// raises the part size, as the part_size entry says, and every part
+// buffer but Put's own grows with it.
 //
 // # Containers
 //

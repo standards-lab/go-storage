@@ -32,8 +32,8 @@ const defaultContentType = "application/octet-stream"
 // is seekable, as the SDK needs to sign a request over plain HTTP, with its
 // length and content type: application/octet-stream when opts gives none.
 // A longer body, of declared or unknown size, streams on: transfermanager
-// uploads it a part at a time, holding a few parts in memory, never the
-// whole body.
+// uploads it a part at a time, concurrency parts in flight, holding the
+// parts the package documentation counts in memory, never the whole body.
 //
 // A failure of body, or a body shorter or longer than a declared Size,
 // fails Put. Before the decision it has sent nothing. During a multipart
