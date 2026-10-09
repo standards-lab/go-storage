@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
@@ -54,6 +55,9 @@ type Client struct {
 	bucket   string
 	region   string
 	partSize int64
+	// readRetries is how many times per read a Get's body resumes after a
+	// failed read: as many as the SDK retries each request.
+	readRetries int
 }
 
 // New constructs a Client from a finalized config without I/O, as the
@@ -132,7 +136,14 @@ func New(cfg storage.Config) (*Client, error) {
 		o.MultipartUploadThreshold = partSize
 		o.FailTimeout = abortTimeout
 	})
-	return &Client{s3: client, uploader: uploader, bucket: cfg.Container, region: region, partSize: partSize}, nil
+	return &Client{
+		s3:          client,
+		uploader:    uploader,
+		bucket:      cfg.Container,
+		region:      region,
+		partSize:    partSize,
+		readRetries: readRetries(attempts),
+	}, nil
 }
 
 // regionOption reads the region option, applying the default for an unset
@@ -161,6 +172,17 @@ func maxAttempts(options map[string]string) (int, error) {
 		return 0, fmt.Errorf("s3: option %s: %q is not a non-negative integer", optionMaxRetries, v)
 	}
 	return n + 1, nil
+}
+
+// readRetries returns how many retries the SDK's retryer allows a request
+// of the given RetryMaxAttempts: the standard retryer's default attempts
+// less the first when attempts is 0 (unset), and attempts less the first
+// otherwise.
+func readRetries(attempts int) int {
+	if attempts == 0 {
+		attempts = retry.DefaultMaxAttempts
+	}
+	return attempts - 1
 }
 
 // partSizeOption reads the part_size option as a whole number of bytes

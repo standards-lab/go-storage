@@ -47,6 +47,19 @@ func classify(err error) error {
 	return err
 }
 
+// classifyRead classifies a Get body's read failure. An object replaced
+// before a resumption fails the resumed request's If-Match condition, which
+// is storage.ErrNotFound because the version being read no longer exists,
+// as is one deleted, whose NoSuchKey classify maps. classify handles every
+// other failure.
+func classifyRead(err error) error {
+	if respErr, ok := errors.AsType[*smithyhttp.ResponseError](err); ok &&
+		respErr.HTTPStatusCode() == http.StatusPreconditionFailed && !errors.Is(err, storage.ErrNotFound) {
+		return fmt.Errorf("%w: the object changed during the read: %w", storage.ErrNotFound, err)
+	}
+	return classify(err)
+}
+
 // errorCode returns the S3 error code err carries, or "" when it carries
 // none.
 func errorCode(err error) string {

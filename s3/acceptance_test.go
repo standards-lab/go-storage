@@ -6,7 +6,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -603,4 +608,180 @@ func TestAcceptance_MultipartFailureLeavesNothing(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The try_timeout and pause the resumption tests use: the reader pauses
+// past the deadline of the try that opened the body, so the HTTP client
+// cuts that try mid-stream, and the resumed try has the whole deadline to
+// carry the rest.
+const (
+	resumeTryTimeout = 2 * time.Second
+	resumePause      = 3 * time.Second
+)
+
+// resumeObjectSize is the object the resumption tests read: large enough
+// that the body is still streaming, far from its end, when the reader
+// pauses after its first resumeReadFirst bytes.
+const (
+	resumeObjectSize = 32 << 20
+	resumeReadFirst  = 1 << 20
+)
+
+// rangedGet is one GetObject with a Range that a recordingProxy passed on.
+type rangedGet struct {
+	Range   string
+	IfMatch string
+}
+
+// recordingProxy forwards every request to a gateway unchanged, the Host
+// header included so the signature still verifies, and records each
+// GetObject that carries a Range: the resumptions of a Get body.
+type recordingProxy struct {
+	srv *httptest.Server
+
+	mu     sync.Mutex
+	ranged []rangedGet
+}
+
+// newRecordingProxy starts a recordingProxy in front of endpoint and stops
+// it when the test ends.
+func newRecordingProxy(t *testing.T, endpoint string) *recordingProxy {
+	t.Helper()
+	target, err := url.Parse(endpoint)
+	if err != nil {
+		t.Fatalf("parse endpoint: %v", err)
+	}
+	p := &recordingProxy{}
+	forward := &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) {
+		pr.SetURL(target)
+		pr.Out.Host = pr.In.Host
+	}}
+	p.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.Header.Get("Range") != "" {
+			p.mu.Lock()
+			p.ranged = append(p.ranged, rangedGet{Range: r.Header.Get("Range"), IfMatch: r.Header.Get("If-Match")})
+			p.mu.Unlock()
+		}
+		forward.ServeHTTP(w, r)
+	}))
+	t.Cleanup(p.srv.Close)
+	return p
+}
+
+// Ranged returns a copy of the ranged GetObjects the proxy has seen.
+func (p *recordingProxy) Ranged() []rangedGet {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]rangedGet(nil), p.ranged...)
+}
+
+// resumeClients returns a client over cfg's bucket, created, that reaches
+// the gateway directly, and one that reaches it through a recordingProxy
+// with try_timeout set to resumeTryTimeout and max_retries at its default.
+func resumeClients(t *testing.T, cfg storage.Config) (direct, proxied storage.Client, proxy *recordingProxy) {
+	t.Helper()
+	direct = newClient(t, cfg)
+	if err := direct.EnsureContainer(t.Context()); err != nil {
+		t.Fatalf("EnsureContainer: %v", err)
+	}
+	proxy = newRecordingProxy(t, cfg.Endpoint)
+	cfg.Endpoint = proxy.srv.URL
+	cfg.Options = map[string]string{"try_timeout": resumeTryTimeout.String()}
+	return direct, newClient(t, cfg), proxy
+}
+
+// pausedGet opens key through client, reads its first resumeReadFirst
+// bytes, and returns the Blob with the rest of its body unread.
+func pausedGet(t *testing.T, client storage.Client, key string) (storage.Blob, []byte) {
+	t.Helper()
+	blob, err := client.Get(t.Context(), key, storage.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	t.Cleanup(func() { _ = blob.Body.Close() })
+	head := make([]byte, resumeReadFirst)
+	if _, err := io.ReadFull(blob.Body, head); err != nil {
+		t.Fatalf("read the body's first %d bytes: %v", resumeReadFirst, err)
+	}
+	return blob, head
+}
+
+// wantResumedMidStream asserts the proxy saw at least one resumption, each
+// conditioned on etag, and the first from an offset past what the reader
+// took before its pause and short of the object's end, so the try's
+// deadline cut the body mid-stream.
+func wantResumedMidStream(t *testing.T, proxy *recordingProxy, etag string) {
+	t.Helper()
+	ranged := proxy.Ranged()
+	if len(ranged) == 0 {
+		t.Fatal("the gateway saw no ranged GetObject: the body never resumed")
+	}
+	for i, r := range ranged {
+		t.Logf("resumption %d: Range=%q If-Match=%q", i+1, r.Range, r.IfMatch)
+		if r.IfMatch != etag {
+			t.Errorf("resumption %d If-Match = %q, want the first answer's ETag %q", i+1, r.IfMatch, etag)
+		}
+	}
+	var offset int
+	if _, err := fmt.Sscanf(ranged[0].Range, "bytes=%d-", &offset); err != nil {
+		t.Fatalf("resumption Range %q is not bytes=<offset>-: %v", ranged[0].Range, err)
+	}
+	if offset < resumeReadFirst || offset >= resumeObjectSize {
+		t.Errorf("first resumption from byte %d, want one from %d to %d, mid-stream", offset, resumeReadFirst, resumeObjectSize-1)
+	}
+}
+
+// TestAcceptance_GetResumesPastTheTryTimeout reads a 32 MiB object whose
+// reader pauses past try_timeout after its first MiB. The try's deadline
+// cuts the body mid-stream, the body resumes with a ranged GetObject
+// conditioned on the ETag, and the read yields the bytes Put stored.
+func TestAcceptance_GetResumesPastTheTryTimeout(t *testing.T) {
+	cfg := acceptanceConfig(t)
+	direct, client, proxy := resumeClients(t, cfg)
+	key := "resume/whole.bin"
+	content := randomBytes(t, resumeObjectSize)
+	if _, err := direct.Put(t.Context(), key, bytes.NewReader(content), storage.PutOptions{Size: int64(len(content))}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	blob, head := pausedGet(t, client, key)
+	time.Sleep(resumePause)
+	rest, err := io.ReadAll(blob.Body)
+	if err != nil {
+		t.Fatalf("read the body after the pause: %v", err)
+	}
+	if got := append(head, rest...); !bytes.Equal(got, content) {
+		t.Fatalf("Get returned %d bytes, want the %d put, byte for byte", len(got), len(content))
+	}
+	wantResumedMidStream(t, proxy, blob.ETag)
+}
+
+// TestAcceptance_GetOfAReplacedObjectIsNotFound replaces the object while
+// its Get body is paused after its first MiB. The pause outlasts
+// try_timeout, so the body resumes, and the resumption's If-Match on the
+// first answer's ETag fails: the read fails with storage.ErrNotFound.
+func TestAcceptance_GetOfAReplacedObjectIsNotFound(t *testing.T) {
+	cfg := acceptanceConfig(t)
+	direct, client, proxy := resumeClients(t, cfg)
+	key := "resume/replaced.bin"
+	content := randomBytes(t, resumeObjectSize)
+	if _, err := direct.Put(t.Context(), key, bytes.NewReader(content), storage.PutOptions{Size: int64(len(content))}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	blob, _ := pausedGet(t, client, key)
+	replaced, err := direct.Put(t.Context(), key, strings.NewReader("another version"), storage.PutOptions{})
+	if err != nil {
+		t.Fatalf("Put of the replacement: %v", err)
+	}
+	if replaced.ETag == blob.ETag {
+		t.Fatalf("replacement ETag = %q, the same as the version being read", replaced.ETag)
+	}
+	time.Sleep(resumePause)
+	_, err = io.ReadAll(blob.Body)
+	if !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("read after the replacement = %v, want ErrNotFound", err)
+	}
+	t.Logf("read after the replacement: %v", err)
+	wantResumedMidStream(t, proxy, blob.ETag)
 }

@@ -27,6 +27,12 @@ changelog covers this sub-module only; the base module keeps its own.
   body read included, through the HTTP client's timeout. A stalled try is retried up to
   `max_retries` times, and a request whose every try stalls fails with `storage.ErrUnavailable`.
   Unset means no deadline.
+- A Get body resumes a read that fails mid-stream, past `try_timeout` or on a lost connection,
+  with a ranged `GetObject` from its offset conditioned with `If-Match` on the first answer's
+  ETag, up to `max_retries` times per read, so a download outlasts `try_timeout`. An object
+  replaced or deleted before a resumption fails the read with `storage.ErrNotFound`, and a body
+  that stalls on every try fails it with `storage.ErrUnavailable`. A read that resumes is not
+  validated by checksum.
 - Requires `github.com/standards-lab/go-storage` v0.5.0.
 
 [Unreleased]: https://github.com/standards-lab/go-storage/commits/HEAD/s3

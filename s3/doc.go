@@ -58,10 +58,18 @@
 //     part of a multipart upload, or one GetObject together with the read
 //     of its body. A try that passes its deadline is retried like a failed
 //     connection, up to max_retries times, and a request whose every try
-//     stalls fails with storage.ErrUnavailable. A Get's body is therefore
-//     read in full within try_timeout of the GetObject that opened it, or
-//     its read fails with storage.ErrUnavailable; try_timeout must exceed
-//     the longest such read and the longest part upload.
+//     stalls fails with storage.ErrUnavailable. When a Get body's try
+//     passes its deadline mid-read, or its connection fails, the body
+//     resumes from its offset with a ranged GetObject conditioned with
+//     If-Match on the first answer's ETag, as many times per read as
+//     max_retries allows a request, the SDK's default of two retries when
+//     it is unset, and each resumption is a try with a deadline of its own.
+//     A download therefore outlasts try_timeout however slowly the caller
+//     reads. With max_retries 0 the body does not resume. A body that
+//     stalls on every try fails the read with storage.ErrUnavailable once
+//     its resumptions are spent. try_timeout must exceed the longest part
+//     upload, and the time a Get body's reader may pause between reads
+//     without spending a resumption.
 //
 // A malformed value is a construction error. The SDK's default checksum
 // behavior is kept: a request carries a checksum when the operation
@@ -94,7 +102,12 @@
 // object: Get, Stat, and List do not see it until it completes, and its
 // ETag then has the multipart form "<hex>-<parts>".
 //
-// [Client.Get] sends GetObject and streams its body. [Client.Stat] sends
+// [Client.Get] sends GetObject and streams its body, resuming a failed read
+// as the try_timeout entry describes. The SDK validates a body's checksum,
+// when the answer carries one, only once the whole object's body has been
+// read; a ranged answer carries none for the object. A read that resumes
+// is therefore not validated by checksum, neither the bytes before the
+// resumption nor those after it. [Client.Stat] sends
 // HeadObject. [Client.Delete] sends DeleteObject, which S3 answers with
 // success for a missing key. [Client.List] sends ListObjectsV2, one page per
 // call.
@@ -125,7 +138,10 @@
 // storage.ErrNotFound. [Client.Stat] tells a missing key from a missing
 // bucket, which HeadObject answers with the same bare 404, by a HeadBucket
 // that follows it. A Get body's failed read is classified as a request's
-// failure is. A 5xx answer, the SlowDown, ServiceUnavailable, and
+// failure is, but for one case: an object replaced before a resumption
+// fails the resumption's If-Match with 412 PreconditionFailed, which
+// matches storage.ErrNotFound, as a deleted object's NoSuchKey does,
+// because the version being read is gone. A 5xx answer, the SlowDown, ServiceUnavailable, and
 // InternalError codes, and a failure with no response, an expired deadline
 // included, match storage.ErrUnavailable.
 // The caller's cancellation and every other answer, an authentication
@@ -136,8 +152,9 @@
 // The unit tests run against a scripted HTTP server. The acceptance tests
 // run go-storage's conformance suite, storagetest.Run and
 // storagetest.RunMissingContainer, storage.Store.Start, Probe,
-// EnsureContainer, the object operations, and multipart Put's visibility
-// and abort, at 5 MiB parts, against a real gateway when
+// EnsureContainer, the object operations, multipart Put's visibility and
+// abort, at 5 MiB parts, and a Get body's resumption past try_timeout and
+// its failure when the object is replaced mid-read, against a real gateway when
 // S3_TEST_ENDPOINT names its URL, each in a bucket of its own, with the
 // access key admin and the secret secret. The repository's mise tasks start
 // SeaweedFS with those credentials and run them:

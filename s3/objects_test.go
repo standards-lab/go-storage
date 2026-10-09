@@ -870,6 +870,197 @@ func TestGet_StalledBodyReadIsCutOffByTryTimeout(t *testing.T) {
 	}
 }
 
+// rangedObject answers a GetObject for content with the ETag "abc", from
+// the offset a Range of the form bytes=<offset>- names, as a 206 with its
+// Content-Range. A read that starts before stallAt sends the bytes up to
+// stallAt and then stalls until the client gives up on it.
+func rangedObject(content string, stallAt int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		from, code := 0, http.StatusOK
+		if v := r.Header.Get("Range"); v != "" {
+			_, _ = fmt.Sscanf(v, "bytes=%d-", &from)
+			code = http.StatusPartialContent
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", from, len(content)-1, len(content)))
+		}
+		w.Header().Set("ETag", `"abc"`)
+		w.Header().Set("Content-Length", strconv.Itoa(len(content)-from))
+		w.Header().Set("Last-Modified", lastModified.Format(http.TimeFormat))
+		w.WriteHeader(code)
+		if from < stallAt {
+			_, _ = io.WriteString(w, content[from:stallAt])
+			_ = http.NewResponseController(w).Flush()
+			<-r.Context().Done()
+			return
+		}
+		_, _ = io.WriteString(w, content[from:])
+	}
+}
+
+// resumeOnly answers a GetObject with a Range through resume and any other
+// request through first.
+func resumeOnly(first, resume http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "" {
+			resume(w, r)
+			return
+		}
+		first(w, r)
+	}
+}
+
+// A body whose try deadline passes mid-read resumes from its offset with a
+// ranged GetObject conditioned on the first answer's ETag, so the read
+// outlasts try_timeout and yields the object's bytes unchanged.
+func TestGet_ResumesABodyPastTheTryTimeout(t *testing.T) {
+	svc := newService(t, rangedObject("helloworld", 5))
+	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": testTryTimeout.String(), "max_retries": "1"}))
+
+	ctx, cancel := context.WithTimeout(t.Context(), callerDeadline)
+	defer cancel()
+	blob, err := c.Get(ctx, "k", storage.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get = %v, want nil", err)
+	}
+	defer func() { _ = blob.Body.Close() }()
+	data, err := io.ReadAll(blob.Body)
+	if err != nil || string(data) != "helloworld" {
+		t.Fatalf("ReadAll = %q, %v; want the whole object", data, err)
+	}
+	if blob.Size != 10 || blob.ETag != `"abc"` {
+		t.Errorf("Get = %+v, want the first answer's Size 10 and ETag", blob.Object)
+	}
+	reqs := svc.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("service saw %d requests, want the GetObject and one resumption", len(reqs))
+	}
+	if got := reqs[0].Header.Get("Range"); got != "" {
+		t.Errorf("first GetObject Range = %q, want none", got)
+	}
+	if got := reqs[1].Header.Get("Range"); got != "bytes=5-" {
+		t.Errorf("resumption Range = %q, want bytes=5-", got)
+	}
+	if got := reqs[1].Header.Get("If-Match"); got != `"abc"` {
+		t.Errorf("resumption If-Match = %q, want the first answer's ETag", got)
+	}
+}
+
+// A body that stalls on every try resumes as many times per read as the
+// SDK retries each request, and then fails the read with
+// storage.ErrUnavailable. With max_retries 0 the body does not resume.
+func TestGet_AStalledBodyFailsOnceItsRetriesAreSpent(t *testing.T) {
+	cases := []struct {
+		maxRetries string // "" leaves the option unset
+		requests   int    // the GetObject and its resumptions
+	}{
+		{"", 3}, // unset: the SDK's default of three attempts, two retries
+		{"0", 1},
+		{"1", 2},
+		{"2", 3},
+	}
+	for _, tc := range cases {
+		t.Run("max_retries="+tc.maxRetries, func(t *testing.T) {
+			svc := newService(t, resumeOnly(rangedObject("helloworld", 5), func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("ETag", `"abc"`)
+				w.Header().Set("Content-Range", "bytes 5-9/10")
+				w.Header().Set("Content-Length", "5")
+				w.WriteHeader(http.StatusPartialContent)
+				_ = http.NewResponseController(w).Flush()
+				<-r.Context().Done()
+			}))
+			cfg := testConfig(t, svc.endpoint(), map[string]string{"try_timeout": testTryTimeout.String(), "max_retries": tc.maxRetries})
+			if tc.maxRetries == "" {
+				delete(cfg.Options, "max_retries")
+			}
+			c := newClient(t, cfg)
+
+			ctx, cancel := context.WithTimeout(t.Context(), callerDeadline)
+			defer cancel()
+			blob, err := c.Get(ctx, "k", storage.GetOptions{})
+			if err != nil {
+				t.Fatalf("Get = %v, want nil", err)
+			}
+			defer func() { _ = blob.Body.Close() }()
+			data, err := io.ReadAll(blob.Body)
+			if !errors.Is(err, storage.ErrUnavailable) {
+				t.Fatalf("ReadAll = %q, %v; want ErrUnavailable", data, err)
+			}
+			if ctx.Err() != nil {
+				t.Fatalf("ReadAll = %v: the caller's deadline ended it, not the spent retries", err)
+			}
+			if string(data) != "hello" {
+				t.Errorf("read %q before the failure, want hello", data)
+			}
+			reqs := svc.Requests()
+			if len(reqs) != tc.requests {
+				t.Errorf("service saw %d requests, want %d", len(reqs), tc.requests)
+			}
+			for _, r := range reqs[1:] {
+				if got := r.Header.Get("Range"); got != "bytes=5-" {
+					t.Errorf("resumption Range = %q, want bytes=5-", got)
+				}
+			}
+			// A later Read repeats the failure rather than resuming again.
+			if _, again := blob.Body.Read(make([]byte, 1)); !errors.Is(again, storage.ErrUnavailable) || len(svc.Requests()) != tc.requests {
+				t.Errorf("Read after the failure = %v after %d requests, want ErrUnavailable and no resumption", again, len(svc.Requests()))
+			}
+		})
+	}
+}
+
+// An object replaced before a resumption fails the resumed GetObject's
+// If-Match with 412, and one deleted answers NoSuchKey; either fails the
+// read with storage.ErrNotFound, since the version being read is gone.
+func TestGet_AnObjectChangedMidReadIsNotFound(t *testing.T) {
+	cases := map[string]http.HandlerFunc{
+		"replaced": failWith(http.StatusPreconditionFailed, "PreconditionFailed"),
+		"deleted":  failWith(http.StatusNotFound, "NoSuchKey"),
+	}
+	for name, resume := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc := newService(t, resumeOnly(rangedObject("helloworld", 5), resume))
+			c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": testTryTimeout.String(), "max_retries": "1"}))
+
+			ctx, cancel := context.WithTimeout(t.Context(), callerDeadline)
+			defer cancel()
+			blob, err := c.Get(ctx, "k", storage.GetOptions{})
+			if err != nil {
+				t.Fatalf("Get = %v, want nil", err)
+			}
+			defer func() { _ = blob.Body.Close() }()
+			data, err := io.ReadAll(blob.Body)
+			wantOnly(t, "ReadAll", err, storage.ErrNotFound)
+			if string(data) != "hello" {
+				t.Errorf("read %q before the failure, want hello", data)
+			}
+			if n := len(svc.Requests()); n != 2 {
+				t.Errorf("service saw %d requests, want the GetObject and one resumption", n)
+			}
+		})
+	}
+}
+
+// A resumption answered from the object's start, by a service that ignored
+// the Range, fails the read rather than repeat bytes already delivered.
+func TestGet_AResumptionThatIgnoresTheRangeFails(t *testing.T) {
+	svc := newService(t, resumeOnly(rangedObject("helloworld", 5), object(`"abc"`, "text/plain", "helloworld")))
+	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": testTryTimeout.String(), "max_retries": "1"}))
+
+	ctx, cancel := context.WithTimeout(t.Context(), callerDeadline)
+	defer cancel()
+	blob, err := c.Get(ctx, "k", storage.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get = %v, want nil", err)
+	}
+	defer func() { _ = blob.Body.Close() }()
+	data, err := io.ReadAll(blob.Body)
+	if !errors.Is(err, storage.ErrUnavailable) || errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("ReadAll = %v, want ErrUnavailable, the failure the resumption could not recover", err)
+	}
+	if string(data) != "hello" {
+		t.Errorf("read %q, want hello and no byte repeated", data)
+	}
+}
+
 // S3 answers a delete of a missing key with 204; a gateway's NoSuchKey is
 // success too.
 func TestDelete_MissingKeySucceeds(t *testing.T) {

@@ -8,6 +8,8 @@ import (
 	"io"
 	"math"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -197,10 +199,14 @@ func (b *bodyReader) Read(p []byte) (int, error) {
 	return k, err
 }
 
-// Get opens the object at key with one GetObject request. NoSuchKey is
-// storage.ErrNotFound and NoSuchBucket storage.ErrContainerNotFound, as
-// classify maps them; a read of the body that fails is classified the same
-// way.
+// Get opens the object at key with one GetObject request and returns a
+// body that resumes after a failed read, as the try_timeout entry in the
+// package documentation describes. NoSuchKey is storage.ErrNotFound and
+// NoSuchBucket storage.ErrContainerNotFound, as classify maps them. The
+// body classifies a read's failure with classifyRead: a try's deadline or a
+// lost connection is storage.ErrUnavailable, and an object deleted or
+// replaced before a resumption is storage.ErrNotFound, since the version
+// being read is gone.
 func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (storage.Blob, error) {
 	if err := validateKey(key); err != nil {
 		return storage.Blob{}, err
@@ -209,24 +215,170 @@ func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (sto
 	if err != nil {
 		return storage.Blob{}, classify(err)
 	}
+	size := aws.ToInt64(out.ContentLength)
+	if out.ContentLength == nil {
+		size = -1
+	}
+	body := &resumingBody{
+		c:       c,
+		ctx:     ctx,
+		key:     key,
+		etag:    aws.ToString(out.ETag),
+		size:    size,
+		retries: c.readRetries,
+		body:    out.Body,
+	}
 	return storage.Blob{
 		Key:         key,
 		Size:        aws.ToInt64(out.ContentLength),
 		ContentType: aws.ToString(out.ContentType),
 		ETag:        entityTag(out.ETag),
 		ModifiedAt:  aws.ToTime(out.LastModified),
-		Body:        classifiedBody{out.Body},
+		Body:        classifiedBody{body},
 	}, nil
 }
 
-// classifiedBody classifies a Get body's read failures with classify and
-// passes io.EOF through unchanged.
+// errBodyClosed is a Get body's read failure after Close.
+var errBodyClosed = errors.New("s3: read of a closed Get body")
+
+// resumingBody is a Get body that resumes a failed read. When a read of the
+// current answer's body fails, for a try's deadline or a lost connection,
+// it sends a ranged GetObject from its offset, Range bytes=<offset>-,
+// conditioned with If-Match on the first answer's ETag, so the bytes that
+// follow come from the version the read began on. One Read resumes at most
+// retries times before it returns the failure; a resumption's own
+// GetObject is retried by the SDK as any request is.
+//
+// It does not resume when the caller's context is done, after Close, when the first answer carried no ETag to condition on, or when
+// the failure came at or after the last byte, where the only failure left
+// is the SDK's checksum check of a complete body. A failure it returns is
+// returned again on every later Read.
+//
+// The SDK validates a checksum only at the end of a whole object's body,
+// so a read that resumes is not checked; the package documentation says
+// so.
+type resumingBody struct {
+	c       *Client
+	ctx     context.Context
+	key     string
+	etag    string // the first answer's ETag, as the service sent it
+	size    int64  // the object's length, or -1 when the answer gave none
+	retries int
+
+	offset  int64 // bytes delivered so far
+	lastErr error // the failure that ended the last body
+	err     error // the failure every later Read returns
+	closed  atomic.Bool
+
+	// mu guards body, which Close may reach from another goroutine to cut
+	// off a Read in progress.
+	mu   sync.Mutex
+	body io.ReadCloser // the current answer's body; nil after a failure
+}
+
+func (b *resumingBody) Read(p []byte) (int, error) {
+	for resumes := 0; ; {
+		if b.closed.Load() {
+			return 0, errBodyClosed
+		}
+		if b.err != nil {
+			return 0, b.err
+		}
+		body := b.current()
+		if body == nil {
+			if resumes == b.retries || !b.resumable() {
+				b.err = b.lastErr
+				return 0, b.err
+			}
+			resumes++
+			var err error
+			if body, err = b.resume(); err != nil {
+				b.err = err
+				return 0, err
+			}
+		}
+		n, err := body.Read(p)
+		b.offset += int64(n)
+		if err == nil || err == io.EOF {
+			return n, err
+		}
+		_ = body.Close()
+		b.setCurrent(nil)
+		b.lastErr = err
+		if n > 0 {
+			// Deliver what arrived; the next Read resumes after it.
+			return n, nil
+		}
+	}
+}
+
+// current returns the current answer's body, or nil after a failure.
+func (b *resumingBody) current() io.ReadCloser {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.body
+}
+
+// setCurrent makes body the current answer's body. A body set after Close
+// is closed at once.
+func (b *resumingBody) setCurrent(body io.ReadCloser) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.body = body
+	if body != nil && b.closed.Load() {
+		_ = body.Close()
+	}
+}
+
+// resumable reports whether the failure that ended the last body may be
+// resumed after, as the type's documentation lists.
+func (b *resumingBody) resumable() bool {
+	return b.ctx.Err() == nil && b.etag != "" && (b.size < 0 || b.offset < b.size)
+}
+
+// resume sends the ranged, conditioned GetObject that continues the read at
+// its offset, and makes its body the current one. An answer that does not
+// start at the offset, from a service that ignored the Range, would repeat
+// or skip bytes, so it fails the read.
+func (b *resumingBody) resume() (io.ReadCloser, error) {
+	out, err := b.c.s3.GetObject(b.ctx, &awss3.GetObjectInput{
+		Bucket:  aws.String(b.c.bucket),
+		Key:     aws.String(b.key),
+		Range:   aws.String(fmt.Sprintf("bytes=%d-", b.offset)),
+		IfMatch: aws.String(b.etag),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("s3: resume read of %q at byte %d: %w", b.key, b.offset, classifyRead(err))
+	}
+	if want := fmt.Sprintf("bytes %d-", b.offset); !strings.HasPrefix(aws.ToString(out.ContentRange), want) {
+		_ = out.Body.Close()
+		return nil, fmt.Errorf("s3: resume read of %q at byte %d: answer's Content-Range is %q, not the range asked for: %w",
+			b.key, b.offset, aws.ToString(out.ContentRange), b.lastErr)
+	}
+	b.setCurrent(out.Body)
+	return out.Body, nil
+}
+
+// Close closes the current answer's body and stops any later resumption,
+// so a Read it cuts off fails rather than resumes.
+func (b *resumingBody) Close() error {
+	b.closed.Store(true)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.body != nil {
+		return b.body.Close()
+	}
+	return nil
+}
+
+// classifiedBody classifies a Get body's read failures with classifyRead
+// and passes io.EOF through unchanged.
 type classifiedBody struct{ io.ReadCloser }
 
 func (b classifiedBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
 	if err != nil && err != io.EOF {
-		err = classify(err)
+		err = classifyRead(err)
 	}
 	return n, err
 }
