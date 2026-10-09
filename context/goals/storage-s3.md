@@ -1,13 +1,13 @@
 # goal · storage-s3
 
-- **State:** brief ready
-- **Task:** hardening
-- **Branch:** hardening
+- **State:** idle
+- **Task:** none
+- **Branch:** none
 
 ## Tasks
 
 1. [x] port
-2. [ ] hardening
+2. [x] hardening
 
 ## Task brief · hardening
 
@@ -89,9 +89,6 @@ blobfs/postgres through sqlate) or where a breaking requirement is pulled into i
 azureblob's go-storage v0.5.0 entry); patch where only a non-breaking requirement moves
 (sqlint, go-web-sdk, rate-limit, template). go-web-service is an application: no tag.
 
-## Progress
-
-slices 24/24 committed (24 folded into validation) (go-observability: 394e40d, a165dd0; go-web-sdk: 7e470e5, 585349b; go-web-sdk-template: 051e104; blobfs (release prep): e7ee001; go-core: 716ce22, cb7ac10; go-database: b762ca6, 1a54054, cc46f4d; go-observability: 394e40d; go-web-sdk: 7e470e5; go-storage: d3b165f, 8afbb0d, 13179c2, 4c12efe, 22fc733, 445b840, 521f571, 341cd14, dea7739; sqlate: a6e772f, 87b176d, f191d3d, cf825d6, fd6c5df; blobfs: 3e5290f, 45c1260; go-web-service: ef628fe, b5695a1) · reviews of 1–14: standards ✓, spec ✓, editor ✓ · reviews of 15–24: standards ✓ (go-core decc346; sqlate 237db5b, 9711b30; go-database 7eed8d6; go-observability 7c44d2d; go-web-sdk 8135b87; template 4543c21; go-storage db8ea20; blobfs b17ac48) · spec ✓ (gap closed: blobfs fe7a707) · editor ✓
 
 ## Decisions
 
