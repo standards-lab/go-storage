@@ -69,10 +69,11 @@ mise run upgrade    # upgrade every module's go directive and requirements, and 
 The unit tests need no service. Each provider's acceptance tests run the conformance suite against
 a real service when its endpoint variable is set, and skip otherwise: `azureblob`'s read
 `AZUREBLOB_TEST_ENDPOINT` and `s3`'s read `S3_TEST_ENDPOINT`. The acceptance harness is a compose
-stack with one service per provider, Azurite and SeaweedFS, each keeping its data in memory. Each
-service's image is defined by `compose/<service>/Dockerfile`, whose `FROM` line is its one pin;
-`SEAWEEDFS_PORT` and `AZURITE_BLOB_PORT` move the published ports off 8333 and 10000, and the
-acceptance tasks' endpoints follow them. CI runs the same `acceptance` task:
+stack with one service per provider, Azurite and SeaweedFS, each keeping its data on tmpfs, so
+every start is empty. Each service builds from `compose/<service>/Dockerfile`, whose `FROM` line
+is its one image pin and which carries its configuration and health check. `SEAWEEDFS_PORT` and
+`AZURITE_BLOB_PORT` move the published ports off 8333 and 10000, and the acceptance tasks'
+endpoints follow them. CI runs the same `acceptance` task:
 
 ```
 mise run up                    # start every harness service and wait until each is healthy

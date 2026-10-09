@@ -3,8 +3,8 @@
 The claims below rest on documentation or on an emulator, not on the live service. A run against
 the service that contradicts one invalidates the text that states it.
 
-`azureblob` passes the conformance suite against Azurite, started with `--skipApiVersionCheck`,
-and no live Azure account has run it:
+`azureblob` passes the conformance suite against Azurite, started with `--skipApiVersionCheck`
+and `--loose` (`compose/azurite/Dockerfile`), and no live Azure account has run it:
 
 - **`ValidateKey`'s rules and the container-name rules `New` applies.** They come from Azure's
   documentation. Azurite accepts every key that breaks them, so only unit tests cover them.
