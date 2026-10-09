@@ -99,10 +99,8 @@
 // The unit tests run against a scripted HTTP server. The acceptance tests run
 // storagetest.Run, storagetest.RunMissingContainer, and a storage.Store.Start
 // against a real service when AZUREBLOB_TEST_ENDPOINT names its URL, each in
-// a container of its own, with the published development account and key:
+// a container of its own, with the published development account and key.
+// The repository's mise task starts Azurite, runs them, and stops it:
 //
-//	docker run --rm -p 10000:10000 \
-//		mcr.microsoft.com/azure-storage/azurite:3.37.0 \
-//		azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck --loose
-//	AZUREBLOB_TEST_ENDPOINT=http://127.0.0.1:10000/devstoreaccount1 go test ./...
+//	mise run acceptance:azureblob
 package azureblob

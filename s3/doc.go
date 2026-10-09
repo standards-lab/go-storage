@@ -174,10 +174,8 @@
 // abort, at 5 MiB parts, and a Get body's resumption past try_timeout and
 // its failure when the object is replaced mid-read, against a real gateway
 // when S3_TEST_ENDPOINT names its URL, each in a bucket of its own, with
-// the access key admin and the secret secret. The repository's mise tasks
-// start SeaweedFS with those credentials and run them:
+// the access key admin and the secret secret. The repository's mise task
+// starts SeaweedFS with those credentials, runs them, and stops it:
 //
-//	mise run seaweedfs:start
-//	mise run acceptance
-//	mise run seaweedfs:stop
+//	mise run acceptance:s3
 package s3
