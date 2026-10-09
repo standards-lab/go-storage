@@ -182,6 +182,7 @@ slices 24/24 committed (24 folded into validation) (go-observability: 394e40d, a
 - hardening: UTC docs and changelog entries share one wording, "in time.UTC, whatever time.Local is", and a changelog entry for a converted time states the instant is unchanged.
 - hardening (spec review): blobfs/postgres v0.4.0's changelog names its sqlate/sqlint tool requirement, v0.3.0, the one gap the review found.
 - SHIP checklist: sqlate/postgres adds `var _ migrate.HistoryUpgrader = Dialect{}` once it requires sqlate v0.5.0; blobfs adds the CreatedAt/UpdatedAt UTC test under London with its sqlate v0.5.0 bump; blobfs/postgres and go-web-service bump the sqlint tool to v0.3.0; go-storage's providers re-run acceptance after requiring v0.6.0; go-web-service's integration tier proves its JSON times end in Z; changelog sections dated 2026-10-09 are re-dated if their tags land later.
+- hardening (architect, at BRIEF): rate-limit keeps its 300 requests/minute default as an operational default; the open question in go-web-sdk/context/middleware-sourcing.md is closed before rate-limit/v0.3.0.
 
 ## Pending edits
 
