@@ -27,17 +27,22 @@ const defaultContentType = "application/octet-stream"
 // one as a multipart upload through transfermanager, so the object appears
 // whole or not at all. It reads the body through a part and one byte more
 // into memory to decide. A body that fits is sent from that buffer, which
-// is seekable, as the SDK needs to sign a request over plain HTTP. A longer
-// body streams on: transfermanager uploads it a part at a time, holding a
-// few parts in memory, never the whole body.
+// is seekable, as the SDK needs to sign a request over plain HTTP, with its
+// length and content type: application/octet-stream when opts gives none.
+// A longer body, of declared or unknown size, streams on: transfermanager
+// uploads it a part at a time, holding a few parts in memory, never the
+// whole body.
 //
 // A failure of body, or a body shorter or longer than a declared Size,
-// fails Put. Before the decision it has sent nothing; during a multipart
-// upload, transfermanager aborts the upload, and Put sends one more
-// AbortMultipartUpload for the same upload ID, because transfermanager
+// fails Put. Before the decision it has sent nothing. During a multipart
+// upload, a failure of body, a part, the completion, or ctx aborts the
+// upload: transfermanager aborts on a context of its own, and Put sends one
+// more AbortMultipartUpload for the same upload ID, because transfermanager
 // drops the error of an abort that fails after another failure, and S3
-// advises a repeat abort to free parts still in flight. A failure of body
-// is returned wrapped and unclassified; any other failure is classified.
+// advises a repeat abort to free parts still in flight. An abort that still
+// fails is named in Put's error, since the upload's parts may then remain
+// until a lifecycle rule removes them. A failure of body is returned
+// wrapped and unclassified; any other failure is classified.
 //
 // Neither PutObject's answer nor CompleteMultipartUpload's carries a
 // Last-Modified, so a HeadObject follows either for the ModifiedAt the

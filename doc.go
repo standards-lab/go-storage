@@ -3,8 +3,8 @@
 // share, the [Store] lifecycle wrapper over a provider's Client, and the
 // [Config] that bounds it. It depends on the standard library and go-core
 // alone. A provider implements Client over its SDK in a sub-module that a
-// consumer imports once, at the composition root; the azureblob sub-module
-// is the Azure Blob provider.
+// consumer imports once, at the composition root; the azureblob and s3
+// sub-modules are the Azure Blob and S3 providers.
 //
 // # The standard tier
 //

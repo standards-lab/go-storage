@@ -1,8 +1,9 @@
 // Package s3 is a go-storage provider over the S3 API. Its [Client]
 // implements storage.Client over one bucket, built on aws-sdk-go-v2's
 // service/s3 and feature/s3/transfermanager and authenticated with a static
-// access key, and [New] constructs it. It is validated against SeaweedFS's S3 gateway. The
-// sections below state how the Client maps storage's contract onto S3.
+// access key, and [New] constructs it. It is validated against SeaweedFS's
+// S3 gateway. The sections below state how the Client maps storage's
+// contract onto S3.
 //
 // # Construction
 //
@@ -72,40 +73,17 @@
 //
 // # Objects
 //
-// [Client.Put] is all or nothing: the object appears whole, or Put fails
-// and leaves any object at the key unchanged. It reads the body into memory
-// through one part and one byte more, never further, to choose how to send
-// it. A body of at most one part goes up as one PutObject with its length
-// and content type, application/octet-stream when the caller gives none. A
-// longer body, of declared or unknown size, goes up as a multipart upload
-// through transfermanager, which streams the rest of the body a part at a
-// time, holding a few parts in memory at once. An upload in progress is not
-// an object: Get, Stat, and List do not see it until it completes, and its
+// [Client.Put] is all or nothing: it sends a body of at most one part as a
+// single PutObject and a longer one as a multipart upload through
+// transfermanager, aborted on failure; its doc comment states how it reads
+// the body, aborts, and reports ModifiedAt. An upload in progress is not an
+// object: Get, Stat, and List do not see it until it completes, and its
 // ETag then has the multipart form "<hex>-<parts>".
-//
-// A body that fails, or that is shorter or longer than a declared Size,
-// fails Put. Within the first part, that is before any request. During a
-// multipart upload, the upload is aborted, as it is when a part, the
-// completion, or the caller's context fails: transfermanager aborts on a
-// context of its own, and Put sends one AbortMultipartUpload more for the
-// same upload, because transfermanager drops the error of an abort that
-// fails after another failure, and S3 advises a repeat abort to free parts
-// still in flight. An abort that still fails is named in Put's error,
-// since the upload's parts may then remain until a lifecycle rule removes
-// them. A body's failure is returned unclassified.
-//
-// Neither PutObject's answer nor CompleteMultipartUpload's carries a
-// Last-Modified, so a HeadObject follows either for the ModifiedAt the
-// other operations report; should that HeadObject fail, or see another
-// writer's ETag, Put still succeeds and takes ModifiedAt from the write
-// answer's Date header.
 //
 // [Client.Get] sends GetObject and streams its body. [Client.Stat] sends
 // HeadObject. [Client.Delete] sends DeleteObject, which S3 answers with
-// success for a missing key. [Client.List] sends ListObjectsV2 with the
-// prefix, the continuation token, and the limit as max-keys, which S3 caps
-// at 1,000; Page.Next is the next continuation token while the listing is
-// truncated, and empty on the last page.
+// success for a missing key. [Client.List] sends ListObjectsV2, one page per
+// call.
 //
 // Every operation reports the ETag in HTTP entity-tag form, adding the
 // quotes to a value a gateway sends without them, so Put, Get, Stat, and
@@ -130,14 +108,12 @@
 // still reaches the SDK's smithy.APIError and its HTTP response error.
 // NoSuchBucket matches storage.ErrContainerNotFound, and so does a 404 on a
 // bucket request, whose HEAD answer carries no code. NoSuchKey matches
-// storage.ErrNotFound. Stat's HeadObject answers a missing key and a missing
-// bucket with the same bare 404, so a HeadBucket follows it: a missing
-// bucket is storage.ErrContainerNotFound, an existing one makes the 404
-// storage.ErrNotFound, and a HeadBucket that fails otherwise is classified
-// on its own and never matches storage.ErrNotFound. A Get body's failed
-// read is classified as a request's failure is. A 5xx answer, the
-// SlowDown, ServiceUnavailable, and InternalError codes, and a failure with
-// no response, an expired deadline included, match storage.ErrUnavailable.
+// storage.ErrNotFound. [Client.Stat] tells a missing key from a missing
+// bucket, which HeadObject answers with the same bare 404, by a HeadBucket
+// that follows it. A Get body's failed read is classified as a request's
+// failure is. A 5xx answer, the SlowDown, ServiceUnavailable, and
+// InternalError codes, and a failure with no response, an expired deadline
+// included, match storage.ErrUnavailable.
 // The caller's cancellation and every other answer, an authentication
 // failure included, pass through unclassified.
 //
