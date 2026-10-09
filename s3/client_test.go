@@ -162,9 +162,13 @@ func TestNew_PanicsOnUnfinalizedConfig(t *testing.T) {
 	_, _ = s3.New(storage.Config{Container: testBucket, Account: testAccount, Key: testKey})
 }
 
-// New performs no I/O: a client aimed at a port nothing listens on builds.
+// New performs no I/O: the service it is aimed at sees no request.
 func TestNew_PerformsNoIO(t *testing.T) {
-	newClient(t, testConfig(t, closedEndpoint(t), nil))
+	svc := newService(t, status(http.StatusOK))
+	newClient(t, testConfig(t, svc.endpoint(), nil))
+	if n := len(svc.Requests()); n != 0 {
+		t.Fatalf("service saw %d requests during New, want none", n)
+	}
 }
 
 // A set Endpoint is the base endpoint, addressed path-style, and requests
