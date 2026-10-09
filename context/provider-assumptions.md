@@ -14,8 +14,9 @@ and no live Azure account has run it:
   Azurite's is the last key of the page, and Azure's is documented as an opaque token.
 
 Four claims the standard tier rests on concern S3. `s3` passes the conformance suite against
-SeaweedFS 4.48's S3 gateway, the image `compose/seaweedfs/Dockerfile` pins, started with `-s3.autoCreateBucket=false`, and
-each claim has a test against it; no live AWS account has run them:
+SeaweedFS 4.48's S3 gateway, the image `compose/seaweedfs/Dockerfile` pins, started with
+`-s3.autoCreateBucket=false`, and each claim has a test against it; no live AWS account has run
+them:
 
 - **`CreateBucket`'s existing-bucket result.** `EnsureContainer` needs `CreateBucket` to report an
   existing bucket distinguishably. SeaweedFS answers an owner's re-create with 409
