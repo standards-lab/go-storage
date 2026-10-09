@@ -151,7 +151,7 @@ func TestAcceptance_StoreStart(t *testing.T) {
 	if put.ETag != stat.ETag || put.ETag != blob.ETag {
 		t.Errorf("ETag differs across Put %q, Get %q, Stat %q", put.ETag, blob.ETag, stat.ETag)
 	}
-	if !put.ModifiedAt.Equal(stat.ModifiedAt) || !put.ModifiedAt.Equal(blob.ModifiedAt) {
+	if put.ModifiedAt != stat.ModifiedAt || put.ModifiedAt != blob.ModifiedAt {
 		t.Errorf("ModifiedAt differs across Put %v, Get %v, Stat %v", put.ModifiedAt, blob.ModifiedAt, stat.ModifiedAt)
 	}
 	if stat.ContentType != "text/plain" || !strings.EqualFold(blob.ContentType, "text/plain") {

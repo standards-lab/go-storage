@@ -11,14 +11,18 @@ only; each provider sub-module keeps its own.
 
 ### Changed
 
-- `Object.ModifiedAt` is documented as `time.UTC`, whatever the process's local zone, so two
-  reports of one write compare equal with `==` as well as with `Equal`.
-- `storagetest.Fake` stamps `ModifiedAt` in UTC, converting the reading of a clock injected with
-  `WithClock`, and `Fake.LastEnsure` and `Fake.LastProbe` report their deadlines in UTC.
+- The contract documents that `Object.ModifiedAt` is in `time.UTC`, whatever `time.Local` is, so
+  two reports of one write compare equal with `==` as well as with `Equal`.
+- **Breaking:** `storagetest.Fake` stamps `ModifiedAt` in `time.UTC`, converting the reading of
+  a clock injected with `WithClock`, and `Fake.LastEnsure` and `Fake.LastProbe` report their
+  deadlines in `time.UTC`. They were in `time.Local`, or the injected clock's zone, before. The
+  instant is unchanged.
 - **Breaking:** the conformance suite asserts that every `ModifiedAt` from `Put`, `Get`, `Stat`,
   and `List` is in `time.UTC`, so a third-party provider that reports one in another zone, such
   as the fixed `GMT` zone `time.Parse` gives an RFC 1123 date, passed v0.5.0's suite but fails
   this one.
+- The `go-core` requirement is v0.7.0, whose logger writes each record's time in `time.UTC`,
+  whatever `time.Local` is.
 
 ## [v0.5.0] - 2026-10-08
 

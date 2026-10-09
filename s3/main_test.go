@@ -8,10 +8,10 @@ import (
 )
 
 // TestMain runs the package's tests with time.Local set to Europe/London,
-// a zone that abbreviates GMT. There Go's time.Parse places a date that
-// names GMT in time.Local, and elsewhere in a fixed "GMT" zone, so a
-// ModifiedAt the provider failed to convert to time.UTC fails the tests'
-// == comparisons whatever zone the host runs in.
+// so a time the package returned in time.Local, not time.UTC, fails the
+// tests' == comparisons whatever zone the host runs in. London abbreviates
+// GMT, so Go's time.Parse places a date that names GMT in time.Local there
+// in winter, and in a fixed "GMT" zone otherwise; == catches either.
 func TestMain(m *testing.M) {
 	london, err := time.LoadLocation("Europe/London")
 	if err != nil {

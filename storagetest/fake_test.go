@@ -536,8 +536,8 @@ func TestFake_EnsureContainerCreatesOnce(t *testing.T) {
 	if got := f.Ensures(); got != 2 {
 		t.Errorf("ensures = %d, want 2", got)
 	}
-	if deadline, bounded := f.LastEnsure(); !bounded || !deadline.Equal(want) {
-		t.Errorf("LastEnsure() = %v, %t; want %v, true", deadline, bounded, want)
+	if deadline, bounded := f.LastEnsure(); !bounded || !deadline.Equal(want) || deadline.Location() != time.UTC {
+		t.Errorf("LastEnsure() = %v, %t; want %v in UTC, true", deadline, bounded, want.UTC())
 	}
 	// Put runs first, so every later operation finds the key or, for
 	// Delete, removes it.

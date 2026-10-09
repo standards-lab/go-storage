@@ -871,7 +871,7 @@ func TestETag_EntityTagForm(t *testing.T) {
 					t.Errorf("%s ETag = %q, want %q", op, got, want)
 				}
 			}
-			if !page.Objects[0].ModifiedAt.Equal(stat.ModifiedAt) {
+			if page.Objects[0].ModifiedAt != stat.ModifiedAt {
 				t.Errorf("List ModifiedAt = %v, want Stat's %v", page.Objects[0].ModifiedAt, stat.ModifiedAt)
 			}
 		})

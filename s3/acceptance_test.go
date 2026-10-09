@@ -241,7 +241,7 @@ func TestAcceptance_StoreObjects(t *testing.T) {
 		}
 	}
 	for op, at := range map[string]time.Time{"Get": blob.ModifiedAt, "Stat": stat.ModifiedAt, "List": page.Objects[0].ModifiedAt} {
-		if !at.Equal(put.ModifiedAt) {
+		if at != put.ModifiedAt {
 			t.Errorf("%s ModifiedAt = %v, want %v as Put reported", op, at, put.ModifiedAt)
 		}
 	}
@@ -527,7 +527,7 @@ func TestAcceptance_MultipartInvisibleUntilComplete(t *testing.T) {
 	t.Logf("List: ETag=%q ModifiedAt=%v Size=%d", page.Objects[0].ETag, page.Objects[0].ModifiedAt, page.Objects[0].Size)
 	for op, obj := range map[string]storage.Object{"Get": {ETag: blob.ETag, ModifiedAt: blob.ModifiedAt, Size: blob.Size},
 		"Stat": stat, "List": page.Objects[0]} {
-		if obj.ETag != put.ETag || !obj.ModifiedAt.Equal(put.ModifiedAt) || obj.Size != put.Size {
+		if obj.ETag != put.ETag || obj.ModifiedAt != put.ModifiedAt || obj.Size != put.Size {
 			t.Errorf("%s ETag=%q ModifiedAt=%v Size=%d, want %q, %v, and %d as Put reported", op, obj.ETag, obj.ModifiedAt, obj.Size, put.ETag, put.ModifiedAt, put.Size)
 		}
 	}
