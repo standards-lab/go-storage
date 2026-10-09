@@ -22,7 +22,7 @@ the standard's principles it enhances are stated below. Its repository-level pri
   that provider's own sub-module, and the base module never imports it.
 - `s3` pins aws-sdk-go-v2's `feature/s3/transfermanager`, the S3 SDK's transfer companion, for
   multipart upload — admitted as a stated v0 exception: AWS has not released it past v0, and it
-  passes every other standard-library marker: it solves a specification, S3's multipart upload
+  passes every other marker of an industry-standard library: it solves a specification, S3's multipart upload
   protocol; `Put` hides it behind `io.Reader` and `context.Context`, so it can be removed without
   touching callers; it adds no module beyond the SDK modules `s3` already compiles; and the
   project that defines the ecosystem maintains it, as the successor to the deprecated

@@ -74,7 +74,6 @@ tests; each AWS side is from AWS's documentation and untested:
 - **The declared object size.** SeaweedFS ignores a wrong `x-amz-mp-object-size` that AWS rejects;
   the adapter checks a declared `Size` itself and relies on neither.
 
-
 One constraint is the protocol's, not the gateway's: SigV4 signs `Host`, so the recording proxy
 the resumption tests read through forwards the incoming `Host` rather than rewriting it. Azure's
 shared key leaves the host unsigned, so a proxy in front of Azurite may rewrite it.

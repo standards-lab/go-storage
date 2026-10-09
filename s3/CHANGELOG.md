@@ -37,11 +37,9 @@ changelog covers this sub-module only; the base module keeps its own.
   that stalls on every try fails it with `storage.ErrUnavailable`. A read that resumes is not
   validated by checksum.
 - The `concurrency` option: the number of parts of one multipart upload in flight at once, an
-  integer from 1 to 32. Unset means 4. The package documentation states the memory a multipart
-  Put holds: at most `part_size` × (`concurrency` + 2) bytes of the body read ahead of the
-  acknowledged parts, 48 MiB at the defaults, and up to `part_size` × (`concurrency` + 3) while
-  the upload starts, or (`concurrency` + 4) for a body of unknown size, 56 or 64 MiB at the
-  defaults. A declared `Size` that raises the part size raises them too.
+  integer from 1 to 32. Unset means 4. At the defaults a multipart `Put` reads at most 48 MiB of
+  its body ahead of the acknowledged parts and holds up to 64 MiB while the upload starts; the
+  package documentation counts the memory.
 - Requires `github.com/standards-lab/go-storage` v0.5.0.
 
 [Unreleased]: https://github.com/standards-lab/go-storage/compare/s3/v0.1.0...HEAD

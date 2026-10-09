@@ -115,14 +115,12 @@ floor, and at the service's 10,000-part limit admits a body of unknown size up t
 declared `Size` raises the part size as far as it needs. The part ceiling is S3's 5 GiB. Four
 parts in flight, within the same 1 to 32 as `azureblob`'s workers, overlap request latency. The
 memory is larger than `azureblob`'s: a part is twice a block, and transfermanager reads ahead of
-the parts in flight. A multipart `Put` reads at most `part_size` × (`concurrency` + 2) bytes of
-its body ahead of the parts the service has acknowledged, 48 MiB at the defaults. While the
-upload starts, `Put`'s own buffer, which decides between one `PutObject` and a multipart upload,
-is still held beside transfermanager's, so a `Put` holds up to `part_size` × (`concurrency` + 3)
-bytes, 56 MiB, or `part_size` × (`concurrency` + 4), 64 MiB, for a body of unknown size, whose
-buffer grows by doubling. A declared `Size` that raises the part size raises these figures with
-it. A body of at most one part is one `PutObject` sent from that buffer, and a process holds the
-per-`Put` figure once for each of its concurrent `Put`s, as with `azureblob`.
+the parts in flight, and while the upload starts `Put`'s own buffer, which decides between one
+`PutObject` and a multipart upload, is still held beside transfermanager's. The package
+documentation counts the bytes: at the defaults a multipart `Put` reads 48 MiB ahead of the
+parts the service has acknowledged, and holds up to 64 MiB while it starts. A body of at most one
+part is one `PutObject` sent from that buffer, and a process holds the per-`Put` figure once for
+each of its concurrent `Put`s, as with `azureblob`.
 
 ## Swapping providers
 
@@ -157,7 +155,7 @@ killed mid-upload never aborts it, and no one keeps its upload ID: a retried `Pu
 upload of its own, and `Delete` of the key cannot reach the old one. The orphan is invisible to
 `Get`, `Stat`, and `List`, and its parts stay stored, and on AWS billed, until a bucket lifecycle
 rule with `AbortIncompleteMultipartUpload` or a `ListMultipartUploads` sweep frees it. A bucket
-that takes multipart uploads therefore carries that lifecycle rule, with a
-`DaysAfterInitiation` beyond the longest upload. `EnsureContainer` never configures a bucket, so the rule is set where the bucket
-is provisioned. Azure documents no counterpart to configure: it discards a blob's uncommitted
+that takes multipart uploads therefore carries that lifecycle rule, with a `DaysAfterInitiation`
+beyond the longest upload. `EnsureContainer` never configures a bucket, so the rule is set where
+the bucket is provisioned. Azure documents no counterpart to configure: it discards a blob's uncommitted
 blocks itself after a week.
