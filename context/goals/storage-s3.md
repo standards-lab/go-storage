@@ -1,13 +1,13 @@
 # goal · storage-s3
 
-- **State:** idle
-- **Task:** none
-- **Branch:** none
+- **State:** handoff
+- **Task:** hardening
+- **Branch:** hardening
 
 ## Tasks
 
 1. [x] port
-2. [x] hardening
+2. [ ] hardening
 
 ## Task brief · hardening
 
@@ -89,6 +89,10 @@ blobfs/postgres through sqlate) or where a breaking requirement is pulled into i
 azureblob's go-storage v0.5.0 entry); patch where only a non-breaking requirement moves
 (sqlint, go-web-sdk, rate-limit, template). go-web-service is an application: no tag.
 
+
+## Handoff
+
+Next move: tag go-core/v0.7.0, sqlate/v0.5.0, sqlate/postgres/v0.5.0, sqlate/sqlint/v0.3.0, go-database/v0.8.0, go-database/postgres/v0.5.0, go-web-sdk/v0.15.1, go-web-sdk/middleware/rate-limit/v0.3.0, go-observability/v0.2.0, go-observability/otlp/v0.2.0, go-storage/v0.6.0, go-storage/azureblob/v0.5.0, go-storage/s3/v0.1.0, blobfs/v0.6.0, blobfs/postgres/v0.4.0, go-web-sdk-template/template/v0.12.1, then sync. The architect accepted the session brief on 2026-10-09; nothing is published yet. Every repository's release position: `hardening` committed locally and not pushed (go-core, sqlate, go-database, go-observability, go-web-sdk, go-web-sdk-template, go-storage, blobfs, go-web-service). SHIP stopped at layer 1's first publish: pushing go-core's branch was denied by the session's permission settings. Resume at go-core's publish, walking the layers in the session brief (.claude/briefs/storage-s3.md) with the SHIP checklist in Decisions.
 
 ## Decisions
 
