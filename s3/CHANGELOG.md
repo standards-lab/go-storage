@@ -20,9 +20,8 @@ changelog covers this sub-module only; the base module keeps its own.
 - `Client.EnsureContainer`, `Client.Probe`, `Client.Capabilities`, and the object operations,
   so `Client` implements `storage.Client` in full. `Put` is all or nothing, sending a body of
   up to one part as a single `PutObject` and a longer one as a multipart upload that is aborted
-  on failure. Every failure a multipart `Put` returns begins "s3:", as its other failures do: a
-  failed part, a failed completion, and the caller's cancellation midway, which maps to no
-  sentinel.
+  on failure. Every failure a multipart `Put` returns begins "s3:": a failed part, a failed
+  completion, and the caller's cancellation midway, which maps to no sentinel.
 - Error classification into the base module's sentinels in the dual-wrap form.
 - Acceptance tests that run the `storagetest` conformance suite and a `storage.Store.Start`
   against a real gateway, gated on `S3_TEST_ENDPOINT` so they skip on the unit tier.

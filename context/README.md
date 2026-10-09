@@ -9,7 +9,7 @@ The README, `docs/design.md`, and each package's `doc.go` document this reposito
 [Go Elemental](https://github.com/standards-lab/architecture/blob/main/standards/go-elemental/README.md)
 standard states the principles it follows. This context records only working knowledge the code
 and the documentation do not express. `provider-assumptions.md` lists the provider claims no run
-against the live service has proven, with the emulator tests that prove them so far.
+against the live service has proven, and the tests that cover each.
 
 ## Capability map
 

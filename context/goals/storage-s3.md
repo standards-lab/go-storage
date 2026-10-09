@@ -80,7 +80,7 @@ Release       s3/v0.1.0, azureblob/v0.5.0
 
 ## Progress
 
-slices 0/6 committed · standards — · spec — · editor —
+slices 6/6 committed (d3b165f, 8afbb0d, 13179c2, 4c12efe, 22fc733, 445b840) · standards ✓ (a911618, 82e23f5) · spec ✓ (no gaps) · editor ✓
 
 ## Decisions
 
@@ -102,8 +102,33 @@ slices 0/6 committed · standards — · spec — · editor —
 - hardening: Get resumption is proven on the unit tier and in SeaweedFS acceptance.
 - hardening: tag azureblob/v0.5.0 beside s3/v0.1.0, completing the go-storage v0.5.0 ripple.
 - hardening: no base go-storage v0.5.1; the docs-only changes since v0.5.0 ride the next base change.
+- hardening: measured, a multipart Put reads ahead part_size × (concurrency + 2) (48 MiB at the defaults) but holds part_size × (concurrency + 3) with a declared Size (56 MiB) and part_size × (concurrency + 4) without one (64 MiB), since transfermanager copies the first part unpooled and Put's decision buffer grows by doubling; the docs state all three, and the buffering itself is left as it is (out of scope).
+- hardening: a Get body resumes up to max_retries times per Read call, not per body, as azblob's RetryReader counts; a body that trickles a byte per try keeps resuming, each resume costing a try_timeout, and ReadIdleTimeout bounds it under a Store.
+- hardening: the context README has no timeouts content, so it names azureblob where its notes were azureblob-only rather than gaining a timeouts line; STANDARDS.md's timeouts pointer names s3.
+- hardening: s3's first changelog states the "s3:" prefix under Added, not Fixed, since the provider was never released.
+- hardening: a Get body does not resume when the caller's context is done, after Close, when the first answer carried no ETag, or when the failure came at or past the last byte, where only the SDK's end-of-body checksum check fails and a resume would get 416.
+- hardening: a resumption whose Content-Range does not start at the offset, from a gateway that ignored the Range, fails the read with ErrUnavailable, wrapping the failure it could not recover, rather than repeat or skip bytes.
+- hardening: a failed read that arrives with bytes delivers them first and resumes on the next Read.
+- hardening: a Get body's final failure is sticky: later Reads return it without resuming.
+- hardening: Close may cut off a Read from another goroutine; a mutex guards the current body, and a Read that Close cuts off never resumes.
+- hardening: If-Match sends the first answer's ETag verbatim, as the service sent it, not the quoted entity-tag form Get reports.
+- hardening: the multipart prefix is a bare "s3: ", since transfermanager's text already says "upload multipart failed"; it sits outside the sentinel ("s3: storage unavailable: …"), and the abort-failure suffix follows it.
+- hardening: the resumption's classifier is classifyResume, not azureblob's classifyRead, because it classifies only the resumption's GetObject; every other Get body failure goes through classify.
+- hardening: design.md's write path holds the AbortIncompleteMultipartUpload lifecycle-rule recommendation, since it extends the crash case there; the rule is set where the bucket is provisioned, as EnsureContainer never configures a bucket.
+- hardening: provider-assumptions marks the repeated abort's NoSuchUpload path untested, since no unit test answers an abort with it.
 
 ## Pending edits
 
 - coordinator · roadmap: consider a backlog goal for local Azurite start/stop/acceptance tasks in go-storage.
-- hardening · go-storage README: state transfermanager's v0 exception beside the README's link to the standard (dependencies.md).
+- coordinator · roadmap: consider a backlog goal for s3 `Put`'s memory: transfermanager copies the first part out of `Put`'s decision buffer unpooled, and for an unknown size that buffer grows by doubling, so a multipart `Put` holds part_size × (concurrency + 3) or (concurrency + 4) while it starts, against the part_size × (concurrency + 2) it reads ahead (56 and 64 MiB against 48 MiB at the defaults).
+- coordinator · roadmap: consider a backlog goal for transfermanager's standard-library `log` output when a multipart upload's completion fails, which bypasses the application's logger.
+- coordinator · references.toml: under the archived spikes, add `[repos.spike-s3-storage]` with `remote = "https://github.com/JaimeStill/spike-s3-storage.git"` and `archived = true`.
+- coordinator · references.md, "Experiments — archived spikes": add `### spike-s3-storage`: "Asked whether go-storage's `Client` interface holds over S3, with an aws-sdk-go-v2 provider validated against SeaweedFS's S3 gateway, and whether the blobfs CLI runs unchanged on it. Its `s3` module became go-storage's `s3` provider."
+- spike-s3-storage · GitHub: archive the remote, JaimeStill/spike-s3-storage.
+- coordinator · context/service-organization.md, "Anticipated services and their providers": replace "an Azure Blob provider (azurite ↔ Azure Blob) and an S3 provider (minio ↔ S3)" with "go-storage's `azureblob` provider (Azurite ↔ Azure Blob) and its `s3` provider (SeaweedFS ↔ S3)".
+- architecture · standards/go-elemental/principles/release-and-ci.md, "CI": "go-storage's `acceptance` job runs azureblob against Azurite" becomes "go-storage's `acceptance` job runs azureblob against Azurite and s3 against SeaweedFS".
+- architecture · standards/go-elemental/principles/release-and-ci.md, "Tasks": "and tasks that start and stop its compose stack" becomes "and tasks that start and stop the services the suite runs against, a compose stack or, in go-storage, a SeaweedFS container (`seaweedfs:start`, `seaweedfs:stop`)".
+- architecture · standards/go-elemental/principles/tests-and-docs.md, "Integration and acceptance suites": replace the "go-storage's azureblob acceptance tests" bullet with "go-storage's acceptance tests" — `azureblob`'s run the storage conformance suite against a real service when `AZUREBLOB_TEST_ENDPOINT` names one and `s3`'s when `S3_TEST_ENDPOINT` does, skipping otherwise; CI's `acceptance` job runs them against Azurite and SeaweedFS containers on every pull request into `main` and every push to it; locally, `mise run seaweedfs:start`, `mise run acceptance`, and `mise run seaweedfs:stop` run `s3`'s, and no task runs `azureblob`'s.
+- architecture · standards/go-elemental/principles/dependencies.md, the "No provider in a base" bullet: "go-storage's `azureblob`" becomes "go-storage's `azureblob` and `s3`".
+- architecture · standards/go-elemental/principles/dependencies.md, "Sourcing", after go-observability's worked case: add that go-storage's README admits `s3`'s `feature/s3/transfermanager` as a stated v0 exception in a provider sub-module, sourced under the specification category (S3's multipart upload protocol).
+- architecture · standards/go-elemental/README.md, the go-storage row: "with the Azure Blob provider as a sub-module" becomes "with the Azure Blob and S3 providers as sub-modules".

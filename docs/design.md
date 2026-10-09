@@ -7,11 +7,11 @@ type does.
 
 No formal standard exists for object storage, so the standard tier is derived from what the two
 target APIs, Azure Blob Storage and Amazon S3, share, and kept narrow. An interface is the least
-reversible thing a library ships: every provider implements it, and widening it breaks each one.
-The tier was a proposal until a second provider passed the `storagetest` suite. `s3` now passes
-it against SeaweedFS's S3 gateway beside `azureblob` against Azurite, with no gateway-specific
-code path, so the tier is a validated standard. Neither provider has run against its live
-service; `context/provider-assumptions.md` lists the claims that rest on that.
+reversible thing a library ships: every provider implements it, and widening it breaks each one,
+so the tier counts as a standard only once a second provider passes the `storagetest` suite. Two
+providers pass it, `azureblob` against Azurite and `s3` against SeaweedFS's S3 gateway, with no
+gateway-specific code path. Neither has run against its live service;
+`context/provider-assumptions.md` lists the claims that rest on that.
 
 Object storage is protocol-driven, not DSL-driven: a consumer calls operations with typed
 arguments, and there is no text artifact and no dialect.
@@ -71,14 +71,14 @@ three values, holding no policy or state, so the admin surface lives in the cons
 ## Configuration
 
 `Container`, not `Bucket`: the standard tier takes neither provider's vocabulary. Credentials are
-the account's shared key, or S3's static access key, which keeps `azidentity` and MSAL out of
-`azureblob` until a deployment needs managed identity. `MaxObjectSize` and `ListPageSize` have no
-default because a library ships no policy numbers; 0 means unset, and pointer fields were rejected
-because an explicit zero means nothing different. `RequestTimeout` has a default because it bounds
-only the calls `Store` makes for itself; one timeout over every operation would cut off a large
-upload. `ReadIdleTimeout` has a default because it bounds only the store's side of a download: the
-clock runs while a read of a `Get`'s body is in progress, never between reads, so a slow client's
-download is never cut off.
+a static key, Azure's account shared key or S3's access key, which keeps `azidentity` and MSAL
+out of `azureblob` until a deployment needs managed identity. `MaxObjectSize` and `ListPageSize`
+have no default because a library ships no policy numbers; 0 means unset, and pointer fields were
+rejected because an explicit zero means nothing different. `RequestTimeout` has a default
+because it bounds only the calls `Store` makes for itself; one timeout over every operation would
+cut off a large upload. `ReadIdleTimeout` has a default because it bounds only the store's side of
+a download: the clock runs while a read of a `Get`'s body is in progress, never between reads, so
+a slow client's download is never cut off.
 
 A per-request deadline on the object operations belongs to the provider's transport instead: each
 provider's `try_timeout` is that deadline, so a stalled store cannot hold a request indefinitely. It
@@ -113,14 +113,14 @@ of its concurrent `Put`s.
 `s3`'s upload defaults make the same trade within S3's limits. An 8 MiB part is above S3's 5 MiB
 floor, and at the service's 10,000-part limit admits a body of unknown size up to 80 GiB; a
 declared `Size` raises the part size as far as it needs. The part ceiling is S3's 5 GiB. Four
-parts in flight, within the same 1 to 32 as `azureblob`'s workers, overlap request latency. The
-memory is larger than `azureblob`'s: a part is twice a block, and transfermanager reads ahead of
-the parts in flight, and while the upload starts `Put`'s own buffer, which decides between one
+parts in flight, within the same 1 to 32 as `azureblob`'s workers, overlap request latency. A
+`Put` holds more memory than on `azureblob`. A part is twice a block, transfermanager reads ahead
+of the parts in flight, and while the upload starts, `Put`'s own buffer, which decides between one
 `PutObject` and a multipart upload, is still held beside transfermanager's. The package
-documentation counts the bytes: at the defaults a multipart `Put` reads 48 MiB ahead of the
-parts the service has acknowledged, and holds up to 64 MiB while it starts. A body of at most one
-part is one `PutObject` sent from that buffer, and a process holds the per-`Put` figure once for
-each of its concurrent `Put`s, as with `azureblob`.
+documentation counts the bytes: at the defaults a multipart `Put` reads 48 MiB ahead of the parts
+the service has acknowledged and holds up to 64 MiB while it starts. A body of at most one part is
+one `PutObject` sent from that buffer. As with `azureblob`, a process holds the per-`Put` figure
+once for each of its concurrent `Put`s.
 
 ## Swapping providers
 
@@ -157,5 +157,5 @@ upload of its own, and `Delete` of the key cannot reach the old one. The orphan 
 rule with `AbortIncompleteMultipartUpload` or a `ListMultipartUploads` sweep frees it. A bucket
 that takes multipart uploads therefore carries that lifecycle rule, with a `DaysAfterInitiation`
 beyond the longest upload. `EnsureContainer` never configures a bucket, so the rule is set where
-the bucket is provisioned. Azure documents no counterpart to configure: it discards a blob's uncommitted
-blocks itself after a week.
+the bucket is provisioned. Azure documents no counterpart to configure: it discards a blob's
+uncommitted blocks itself after a week.
