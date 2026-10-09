@@ -41,6 +41,14 @@ jobs:
           docker logs azurite
           exit 1
 
+      # This image: line is SeaweedFS's one pin: scripts/seaweedfs.sh takes it
+      # as $image here and reads it from this file under mise run
+      # seaweedfs:start, so the local harness runs the image CI runs.
+      - name: start SeaweedFS
+        env:
+          image: chrislusf/seaweedfs:4.48
+        run: scripts/seaweedfs.sh start
+
       - name: go test -race
         working-directory: azureblob
         env:
