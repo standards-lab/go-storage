@@ -1,8 +1,8 @@
 # goal · storage-s3
 
-- **State:** idle
-- **Task:** none
-- **Branch:** none
+- **State:** building
+- **Task:** port
+- **Branch:** port
 
 ## Tasks
 
@@ -57,12 +57,17 @@ Door          two-way: nothing is tagged; the module, tasks, and CI step revert
               with the merge
 ```
 
+## Progress
+
+- port: approved 2026-10-09; slices 0/4 committed.
+
 ## Decisions
 
 - port: SeaweedFS is pinned once, on CI's `image:` line, and seaweedfs:start reads it, because currency doesn't scan scripts, so a pin in a script would fall behind without anyone noticing.
 - port: the spike's `acceptance` mise task comes along with seaweedfs:start/stop, because release-and-ci asks for a local acceptance task.
 - port: the harness is docker run, as for Azurite; no new harness library.
 - plan: port's brief was written at plan, so start re-runs currency and presents it for approval.
+- port: currency re-run at start (Go 1.27.2, go-storage v0.5.0, AWS SDK patch releases only); the brief covered it, so no round.
 
 ## Pending edits
 
