@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
@@ -23,6 +24,7 @@ const (
 	optionRegion     = "region"
 	optionMaxRetries = "max_retries"
 	optionPartSize   = "part_size"
+	optionTryTimeout = "try_timeout"
 )
 
 // The part_size option's default and bounds. S3 refuses a part, the last
@@ -87,13 +89,30 @@ func New(cfg storage.Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	tryTimeout, err := tryTimeoutOption(cfg.Options)
+	if err != nil {
+		return nil, err
+	}
 
-	// awss3.New, unlike config.LoadDefaultConfig, reads no environment
-	// variable or shared file, so the Config is the client's only input.
+	// awss3.New, unlike config.LoadDefaultConfig, loads no shared config or
+	// credentials file and takes none of these options from the
+	// environment, so the Config sets every option it builds. The SDK does
+	// still read environment variables of its own: the standard retryer
+	// reads AWS_NEW_RETRIES_2026, which changes its backoff and retry-quota
+	// defaults, and request middleware reads a few that only shape headers
+	// such as the user agent.
 	opts := awss3.Options{
 		Region:           region,
 		Credentials:      credentials.NewStaticCredentialsProvider(cfg.Account, cfg.Key, ""),
 		RetryMaxAttempts: attempts,
+	}
+	if tryTimeout > 0 {
+		// The HTTP client's own timeout bounds each try from its send to
+		// the last byte of its answer. A try that runs past it fails with a
+		// timeout the standard retryer treats as a retryable connection
+		// error, and classify maps the last one to storage.ErrUnavailable.
+		// The buildable client keeps the SDK's default transport settings.
+		opts.HTTPClient = awshttp.NewBuildableClient().WithTimeout(tryTimeout)
 	}
 	if cfg.Endpoint != "" {
 		if err := validateEndpoint(cfg.Endpoint); err != nil {
@@ -157,6 +176,20 @@ func partSizeOption(options map[string]string) (int64, error) {
 		return 0, fmt.Errorf("s3: option %s: %q is not a byte count from %d (5 MiB) to %d (5 GiB)", optionPartSize, v, minPartSize, maxPartSize)
 	}
 	return n, nil
+}
+
+// tryTimeoutOption reads the try_timeout option as a positive duration. An
+// unset key returns 0, which New reads as "no deadline on a try".
+func tryTimeoutOption(options map[string]string) (time.Duration, error) {
+	v, ok := options[optionTryTimeout]
+	if !ok {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("s3: option %s: %q is not a positive duration", optionTryTimeout, v)
+	}
+	return d, nil
 }
 
 // validateEndpoint reports whether endpoint is an absolute http or https

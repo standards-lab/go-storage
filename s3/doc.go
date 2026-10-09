@@ -40,7 +40,10 @@
 //   - max_retries: how many times the SDK retries a request that failed with
 //     a transport error or a retryable answer (a 5xx status, a throttling
 //     code), as a non-negative integer. 0 means one try. Unset keeps the SDK
-//     default: three attempts, with jittered exponential backoff.
+//     default: three attempts, with jittered exponential backoff. The
+//     backoff and the retry quota are the SDK standard retryer's defaults,
+//     which its AWS_NEW_RETRIES_2026 environment variable changes when set
+//     to "true".
 //   - part_size: the size of one part of a multipart upload, in bytes, from
 //     5 MiB (5242880), S3's smallest part, to 5 GiB (5368709120), its
 //     largest. Unset means 8 MiB. Put sends a body of up to one part as a
@@ -48,6 +51,17 @@
 //     has at most 10,000 parts, so a body of unknown size can be at most
 //     10,000 parts long, 80 GiB at the default; a declared Size raises the
 //     part size as far as it needs.
+//   - try_timeout: the deadline on each try of a request, as a positive Go
+//     duration such as "30s", so a stalled service cannot hold a call
+//     indefinitely. Unset means no deadline, the SDK default. It bounds one
+//     try from its send to the last byte of its answer: one PutObject, one
+//     part of a multipart upload, or one GetObject together with the read
+//     of its body. A try that passes its deadline is retried like a failed
+//     connection, up to max_retries times, and a request whose every try
+//     stalls fails with storage.ErrUnavailable. A Get's body is therefore
+//     read in full within try_timeout of the GetObject that opened it, or
+//     its read fails with storage.ErrUnavailable; try_timeout must exceed
+//     the longest such read and the longest part upload.
 //
 // A malformed value is a construction error. The SDK's default checksum
 // behavior is kept: a request carries a checksum when the operation

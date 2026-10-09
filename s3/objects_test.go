@@ -833,6 +833,43 @@ func TestGet_BodyReadFailureIsUnavailable(t *testing.T) {
 	}
 }
 
+// try_timeout bounds the read of a Get body within the try that opened it:
+// a body that stalls after its headers fails the read with
+// storage.ErrUnavailable once the try's deadline passes.
+func TestGet_StalledBodyReadIsCutOffByTryTimeout(t *testing.T) {
+	svc := newService(t, byRoute(map[string]http.HandlerFunc{
+		"GET " + testKeyPath: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("ETag", `"abc"`)
+			w.Header().Set("Content-Length", "10")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, "hello")
+			_ = http.NewResponseController(w).Flush()
+			<-r.Context().Done()
+		},
+	}))
+	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": testTryTimeout.String()}))
+
+	ctx, cancel := context.WithTimeout(t.Context(), callerDeadline)
+	defer cancel()
+	start := time.Now()
+	blob, err := c.Get(ctx, "k", storage.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get = %v, want nil: the answer's headers arrived", err)
+	}
+	defer func() { _ = blob.Body.Close() }()
+	data, err := io.ReadAll(blob.Body)
+	elapsed := time.Since(start)
+	if !errors.Is(err, storage.ErrUnavailable) {
+		t.Fatalf("read of a body stalled after %q = %v, want ErrUnavailable", data, err)
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("read = %v after %v: the caller's deadline ended it, not try_timeout", err, elapsed)
+	}
+	if limit := testTryTimeout + time.Second; elapsed > limit {
+		t.Errorf("Get and its read took %v, want under %v", elapsed, limit)
+	}
+}
+
 // S3 answers a delete of a missing key with 204; a gateway's NoSuchKey is
 // success too.
 func TestDelete_MissingKeySucceeds(t *testing.T) {

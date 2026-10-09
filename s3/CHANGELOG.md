@@ -23,6 +23,10 @@ changelog covers this sub-module only; the base module keeps its own.
 - Error classification into the base module's sentinels in the dual-wrap form.
 - Acceptance tests that run the `storagetest` conformance suite and a `storage.Store.Start`
   against a real gateway, gated on `S3_TEST_ENDPOINT` so they skip on the unit tier.
+- The `try_timeout` option: a positive Go duration that bounds each try of a request, a Get's
+  body read included, through the HTTP client's timeout. A stalled try is retried up to
+  `max_retries` times, and a request whose every try stalls fails with `storage.ErrUnavailable`.
+  Unset means no deadline.
 - Requires `github.com/standards-lab/go-storage` v0.5.0.
 
 [Unreleased]: https://github.com/standards-lab/go-storage/commits/HEAD/s3

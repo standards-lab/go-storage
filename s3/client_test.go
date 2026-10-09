@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -451,5 +452,106 @@ func TestCapabilities_MaxKeyLengthIsValidateKeysBound(t *testing.T) {
 	}
 	if err := caps.ValidateKey(strings.Repeat("k", caps.MaxKeyLength+1)); err == nil {
 		t.Errorf("ValidateKey of MaxKeyLength+1 bytes = nil, want an error")
+	}
+}
+
+func TestNew_RejectsBadTryTimeout(t *testing.T) {
+	for _, v := range []string{"", "x", "30", "0", "0s", "-1s"} {
+		t.Run(v, func(t *testing.T) {
+			_, err := s3.New(testConfig(t, "http://127.0.0.1:8333", map[string]string{"try_timeout": v}))
+			if err == nil || !strings.Contains(err.Error(), "try_timeout") {
+				t.Fatalf("New = %v, want an error naming try_timeout", err)
+			}
+		})
+	}
+}
+
+// stall answers nothing until the client gives up on the request.
+func stall(_ http.ResponseWriter, r *http.Request) {
+	<-r.Context().Done()
+}
+
+// testTryTimeout is the try_timeout the deadline tests set: short, so a
+// stalled try fails fast.
+const testTryTimeout = 100 * time.Millisecond
+
+// callerDeadline bounds each deadline test's call, well past what the try
+// deadline allows, so a missing try deadline fails the test rather than
+// hanging it.
+const callerDeadline = 5 * time.Second
+
+// A service that stalls on every try fails the call with ErrUnavailable once
+// max_retries is spent, each try cut off by try_timeout rather than by the
+// caller's deadline.
+func TestTryTimeout_EveryTryStalledIsUnavailable(t *testing.T) {
+	svc := newService(t, stall)
+	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{
+		"max_retries": "1",
+		"try_timeout": testTryTimeout.String(),
+	}))
+
+	ctx, cancel := context.WithTimeout(t.Context(), callerDeadline)
+	defer cancel()
+	start := time.Now()
+	err := c.Probe(ctx)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, storage.ErrUnavailable) {
+		t.Fatalf("Probe against a stalled service = %v, want ErrUnavailable", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("Probe = %v after %v: the caller's deadline ended it, not try_timeout", err, elapsed)
+	}
+	if n := len(svc.Requests()); n != 2 {
+		t.Errorf("service saw %d requests, want 2 with max_retries=1", n)
+	}
+	// Two tries of testTryTimeout each, the SDK's backoff between them (at
+	// most 2s for the first retry), and slack.
+	if limit := 2*testTryTimeout + 3*time.Second; elapsed > limit {
+		t.Errorf("Probe took %v, want under %v", elapsed, limit)
+	}
+}
+
+// A try cut off by try_timeout is retried: a service that stalls only on
+// the first try and then answers gives a successful call.
+func TestTryTimeout_StalledTryIsRetried(t *testing.T) {
+	var tries atomic.Int32
+	svc := newService(t, func(w http.ResponseWriter, r *http.Request) {
+		if tries.Add(1) == 1 {
+			stall(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{
+		"max_retries": "1",
+		"try_timeout": testTryTimeout.String(),
+	}))
+
+	ctx, cancel := context.WithTimeout(t.Context(), callerDeadline)
+	defer cancel()
+	if err := c.Probe(ctx); err != nil {
+		t.Fatalf("Probe = %v, want nil after the stalled try is retried", err)
+	}
+	if n := len(svc.Requests()); n != 2 {
+		t.Errorf("service saw %d requests, want the stalled try and its retry", n)
+	}
+}
+
+// An unset try_timeout puts no deadline on a try: a slow answer still
+// arrives on the first try.
+func TestTryTimeout_UnsetMeansNoDeadline(t *testing.T) {
+	const delay = 3 * testTryTimeout
+	svc := newService(t, func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(delay)
+		w.WriteHeader(http.StatusOK)
+	})
+	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"max_retries": "1"}))
+
+	if err := c.Probe(t.Context()); err != nil {
+		t.Fatalf("Probe of a service answering after %v = %v, want nil", delay, err)
+	}
+	if n := len(svc.Requests()); n != 1 {
+		t.Errorf("service saw %d requests, want 1", n)
 	}
 }
