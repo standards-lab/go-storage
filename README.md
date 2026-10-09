@@ -7,8 +7,8 @@ gates it, the provider key constraints, the error sentinels a provider classifie
 test support a provider proves itself against.
 
 `github.com/standards-lab/go-storage` is the base module. Provider sub-modules are nested modules
-that pin their SDKs and are released on their own tags. `azureblob` is the Azure Blob Storage
-provider, and it is the only one.
+that pin their SDKs and are released on their own tags: `azureblob` is the Azure Blob Storage
+provider, and `s3` is the S3 provider.
 
 ## Standard
 
@@ -45,6 +45,8 @@ the standard's principles it enhances are stated below. Its repository-level pri
   `Client`.
 - `azureblob` (a sub-module) — the Azure Blob Storage provider, over the Azure SDK for Go's
   `azblob` module and authenticated with the account's shared key.
+- `s3` (a sub-module) — the S3 provider, over aws-sdk-go-v2 and authenticated with a static
+  access key.
 
 ## Development
 
@@ -56,9 +58,17 @@ mise run currency   # report requirements, Go, tools, actions, and images behind
 mise run upgrade    # upgrade every module's go directive and requirements, and the tools, to their latest
 ```
 
-The unit tests need no service. `azureblob`'s acceptance tests run the conformance suite against
-a real service when `AZUREBLOB_TEST_ENDPOINT` is set; CI runs them against Azurite, and the
-package documentation of `azureblob` shows how to start it locally.
+The unit tests need no service. Each provider's acceptance tests run the conformance suite against
+a real service when its endpoint variable is set, and skip otherwise. `azureblob`'s tests read
+`AZUREBLOB_TEST_ENDPOINT`; CI runs them against Azurite, and the package documentation of
+`azureblob` shows how to start it locally. `s3`'s tests read `S3_TEST_ENDPOINT`; CI runs them
+against SeaweedFS, and locally they run against the same image:
+
+```
+mise run seaweedfs:start   # start SeaweedFS and wait until its S3 gateway answers
+mise run acceptance        # run s3's tests, acceptance included, against it
+mise run seaweedfs:stop    # stop SeaweedFS and discard its data
+```
 
 ## License
 

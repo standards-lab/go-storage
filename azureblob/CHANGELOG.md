@@ -8,6 +8,12 @@ sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** The `go-storage` requirement is v0.5.0, which requires `go-core` v0.6.0. An
+  importer still on go-core's `lifecycle.Service`, `Add`, or stages breaks, since the
+  requirement pulls go-core v0.6.0 into its build.
+
 ## [v0.4.0] - 2026-09-30
 
 ### Changed

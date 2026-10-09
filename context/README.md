@@ -20,6 +20,7 @@ unbuilt is added when it is about to be built.
 - **`storagetest`**: the in-memory `Fake` and the `Run` and `RunMissingContainer` conformance
   checks.
 - **`azureblob`**: the Azure Blob Storage provider sub-module.
+- **`s3`**: the S3 provider sub-module.
 
 ## Known limits of the adapter
 
@@ -28,6 +29,5 @@ unbuilt is added when it is about to be built.
 
 ## Not built
 
-- **An S3 provider.** It waits for a consumer that earns it (`backlog.second-providers`).
 - **Managed identity.** The provider authenticates with the account's shared key, and the
   deployment goal brings managed identity.

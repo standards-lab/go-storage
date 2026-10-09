@@ -6,7 +6,7 @@
 
 ## Tasks
 
-1. [ ] port
+1. [x] port
 2. [ ] hardening
 
 ## Task brief · port
@@ -63,8 +63,15 @@ Door          two-way: nothing is tagged; the module, tasks, and CI step revert
 - port: the spike's `acceptance` mise task comes along with seaweedfs:start/stop, because release-and-ci asks for a local acceptance task.
 - port: the harness is docker run, as for Azurite; no new harness library.
 - plan: port's brief was written at plan, so start re-runs currency and presents it for approval.
+- port: currency re-run at start (Go 1.27.2, go-storage v0.5.0, AWS SDK patch releases only); the brief covered it, so no round.
+- port: azureblob's changelog marks the go-storage v0.5.0 requirement Breaking, because it pulls go-core v0.6.0 into an importer's build.
+- port: `scripts/seaweedfs.sh` takes the image from `$image` or reads it from `ci.yml`'s one `image:` line, and CI's start step calls the script, so the readiness wait is written once.
+- port: s3's CI test step has no `if:` condition, so a failing azureblob step skips it, as a failing step skips the rest of the job.
+- port: s3's changelog links Unreleased to `commits/HEAD/s3` until s3 has a tag.
+- port: STANDARDS.md names s3 in the pointers whose principles s3 already meets; the timeouts pointer names s3 at hardening.
 
 ## Pending edits
 
 - hardening plan: decide whether to tag azureblob/v0.5.0, since port moves azureblob onto go-storage v0.5.0 (release ripple, release-and-ci.md).
 - coordinator · roadmap: consider a backlog goal for local Azurite start/stop/acceptance tasks in go-storage.
+- hardening · go-storage README: state transfermanager's v0 exception beside the README's link to the standard (dependencies.md).

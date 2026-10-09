@@ -17,10 +17,10 @@ jobs:
       - name: mise run check
         run: mise run check
 
-  # azureblob's acceptance tests run the conformance suite against an Azurite
-  # container, which a step starts because a service container cannot take
-  # Azurite's command-line flags. The step names the image on its own image:
-  # line, so mise run currency finds the pin.
+  # azureblob's and s3's acceptance tests run the conformance suite against an
+  # Azurite and a SeaweedFS container, which steps start because a service
+  # container cannot take either's command-line flags. Each step names its
+  # image on its own image: line, so mise run currency finds the pin.
   acceptance:
     runs-on: ubuntu-latest
     steps:
@@ -41,8 +41,22 @@ jobs:
           docker logs azurite
           exit 1
 
-      - name: go test -race
+      # This image: line is SeaweedFS's one pin: scripts/seaweedfs.sh takes it
+      # as $image here and reads it from this file under mise run
+      # seaweedfs:start, so the local harness runs the image CI runs.
+      - name: start SeaweedFS
+        env:
+          image: chrislusf/seaweedfs:4.48
+        run: scripts/seaweedfs.sh start
+
+      - name: go test -race (azureblob)
         working-directory: azureblob
         env:
           AZUREBLOB_TEST_ENDPOINT: http://127.0.0.1:10000/devstoreaccount1
+        run: go test -race ./...
+
+      - name: go test -race (s3)
+        working-directory: s3
+        env:
+          S3_TEST_ENDPOINT: http://127.0.0.1:8333
         run: go test -race ./...

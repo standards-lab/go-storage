@@ -13,7 +13,8 @@ and no live Azure account has run it:
 - **The listing marker.** The adapter passes `NextMarker` back verbatim and never reads it.
   Azurite's is the last key of the page, and Azure's is documented as an opaque token.
 
-No S3 provider exists, so three claims the standard tier rests on are unexercised:
+Three claims the standard tier rests on concern S3. The `s3` provider handles each, and only
+SeaweedFS has run it, so no live AWS account has tested them:
 
 - **`CreateBucket`'s existing-bucket result.** `EnsureContainer` needs `CreateBucket` to report an
   existing bucket distinguishably.
