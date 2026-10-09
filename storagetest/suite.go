@@ -235,8 +235,9 @@ func stat(t testing.TB, c storage.Client, key string) storage.Object {
 }
 
 // wantObject asserts got describes key with the given size and content type,
-// carries a non-empty ETag and a non-zero ModifiedAt, and agrees with want on
-// the ETag and ModifiedAt. what names the call that produced got.
+// carries a non-empty ETag and a non-zero ModifiedAt in time.UTC, and agrees
+// with want on the ETag and ModifiedAt. what names the call that produced
+// got.
 func wantObject(t testing.TB, what string, got, want storage.Object, key string, size int64, contentType string) {
 	t.Helper()
 	if got.Key != key {
@@ -257,6 +258,8 @@ func wantObject(t testing.TB, what string, got, want storage.Object, key string,
 	}
 	if got.ModifiedAt.IsZero() {
 		t.Errorf("%s ModifiedAt is zero", what)
+	} else if loc := got.ModifiedAt.Location(); loc != time.UTC {
+		t.Errorf("%s ModifiedAt = %v in zone %q, want it in time.UTC", what, got.ModifiedAt, loc)
 	} else if !got.ModifiedAt.Equal(want.ModifiedAt) {
 		t.Errorf("%s ModifiedAt = %v, want %v as Put reported", what, got.ModifiedAt, want.ModifiedAt)
 	}
@@ -342,7 +345,8 @@ func listAll(t testing.TB, c storage.Client, prefix string, limit int) ([]storag
 }
 
 // wantKeys asserts objects holds exactly the keys in want, each once, with
-// the Size and the ETag that Put reported for it.
+// the Size and the ETag that Put reported for it and a ModifiedAt in
+// time.UTC.
 func wantKeys(t testing.TB, what string, objects []storage.Object, want map[string]storage.Object) {
 	t.Helper()
 	seen := make(map[string]int, len(objects))
@@ -364,6 +368,9 @@ func wantKeys(t testing.TB, what string, objects []storage.Object, want map[stri
 			t.Errorf("%s reports ETag %q for %q, want a quoted entity tag", what, obj.ETag, obj.Key)
 		} else if obj.ETag != expected.ETag {
 			t.Errorf("%s reports ETag %q for %q, want %q as Put reported", what, obj.ETag, obj.Key, expected.ETag)
+		}
+		if loc := obj.ModifiedAt.Location(); loc != time.UTC {
+			t.Errorf("%s reports ModifiedAt %v for %q in zone %q, want it in time.UTC", what, obj.ModifiedAt, obj.Key, loc)
 		}
 	}
 	for key := range want {

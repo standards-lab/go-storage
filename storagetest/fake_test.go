@@ -71,7 +71,8 @@ type errReader struct{ err error }
 func (r errReader) Read([]byte) (int, error) { return 0, r.err }
 
 func TestFake_PutGetRoundTrip(t *testing.T) {
-	stamp := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	// A clock in another zone shows the Fake stamps its reading in UTC.
+	stamp := time.Date(2026, 9, 18, 14, 0, 0, 0, time.FixedZone("CEST", 2*60*60))
 	f := storagetest.NewFake(storagetest.WithClock(func() time.Time { return stamp }))
 	ctx := context.Background()
 
@@ -91,8 +92,8 @@ func TestFake_PutGetRoundTrip(t *testing.T) {
 	if obj.ETag == "" {
 		t.Error("ETag is empty")
 	}
-	if !obj.ModifiedAt.Equal(stamp) {
-		t.Errorf("ModifiedAt = %v, want the injected clock's %v", obj.ModifiedAt, stamp)
+	if want := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC); obj.ModifiedAt != want {
+		t.Errorf("ModifiedAt = %v, want the injected clock's reading in UTC, %v", obj.ModifiedAt, want)
 	}
 
 	blob, err := f.Get(ctx, "a/hello.txt", storage.GetOptions{})
@@ -472,8 +473,8 @@ func TestFake_ProbeRecordsDeadline(t *testing.T) {
 	if !bounded {
 		t.Fatal("LastProbe() reports no deadline for a bounded context")
 	}
-	if !deadline.Equal(want) {
-		t.Errorf("LastProbe() deadline = %v, want %v", deadline, want)
+	if !deadline.Equal(want) || deadline.Location() != time.UTC {
+		t.Errorf("LastProbe() deadline = %v, want %v in UTC", deadline, want.UTC())
 	}
 }
 

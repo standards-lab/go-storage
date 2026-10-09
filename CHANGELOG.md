@@ -7,6 +7,19 @@ only; each provider sub-module keeps its own.
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-10-09
+
+### Changed
+
+- `Object.ModifiedAt` is documented as `time.UTC`, whatever the process's local zone, so two
+  reports of one write compare equal with `==` as well as with `Equal`.
+- `storagetest.Fake` stamps `ModifiedAt` in UTC, converting the reading of a clock injected with
+  `WithClock`, and `Fake.LastEnsure` and `Fake.LastProbe` report their deadlines in UTC.
+- **Breaking:** the conformance suite asserts that every `ModifiedAt` from `Put`, `Get`, `Stat`,
+  and `List` is in `time.UTC`, so a third-party provider that reports one in another zone, such
+  as the fixed `GMT` zone `time.Parse` gives an RFC 1123 date, passed v0.5.0's suite but fails
+  this one.
+
 ## [v0.5.0] - 2026-10-08
 
 ### Changed
@@ -150,7 +163,8 @@ only; each provider sub-module keeps its own.
   entity-tag form and equal across `Put`, `Get`, `Stat`, and `List`. `Fake` enforces `Size`
   and reports a quoted ETag.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.6.0...HEAD
+[v0.6.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.6.0
 [v0.5.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.5.0
 [v0.4.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.3.0

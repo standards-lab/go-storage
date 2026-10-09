@@ -159,8 +159,9 @@ func TestPut_ModifiedAtFallsBackToDate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Put = %v, want nil: the object is written", err)
 			}
-			if obj.ETag != `"abc"` || !obj.ModifiedAt.Equal(date) {
-				t.Errorf("Put ETag=%q ModifiedAt=%v, want %q and the Date %v", obj.ETag, obj.ModifiedAt, `"abc"`, date)
+			want := storage.Object{Key: "k", Size: 1, ContentType: "application/octet-stream", ETag: `"abc"`, ModifiedAt: date}
+			if obj != want {
+				t.Errorf("Put = %+v, want %+v, its ModifiedAt the Date", obj, want)
 			}
 		})
 	}
@@ -745,6 +746,86 @@ func TestStat_ReportsMetadata(t *testing.T) {
 	want := storage.Object{Key: "k", Size: 2, ContentType: "application/json", ETag: `"abc"`, ModifiedAt: lastModified}
 	if obj != want {
 		t.Errorf("Stat = %+v, want %+v", obj, want)
+	}
+}
+
+// rfc850 is the obsolete RFC 850 form of an HTTP date, which the SDK
+// accepts after the IMF-fixdate. It parses into a fixed "GMT" zone, or
+// into time.Local under the tests' Europe/London, never into time.UTC.
+const rfc850 = "Monday, 02-Jan-06 15:04:05 GMT"
+
+// Put, from the HeadObject or from the write answer's Date, Get, and Stat
+// report ModifiedAt in time.UTC whichever HTTP date format the gateway
+// sends. Whole Objects compare with ==, so an instant outside time.UTC
+// fails.
+func TestObjectOperations_ModifiedAtIsUTCInEveryDateFormat(t *testing.T) {
+	for name, layout := range map[string]string{"IMF-fixdate": http.TimeFormat, "RFC 850": rfc850} {
+		t.Run(name, func(t *testing.T) {
+			date := lastModified.Add(time.Minute)
+			head := func(etag string) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("ETag", etag)
+					w.Header().Set("Content-Type", "text/plain")
+					w.Header().Set("Content-Length", "1")
+					w.Header().Set("Last-Modified", lastModified.Format(layout))
+					w.WriteHeader(http.StatusOK)
+					if r.Method == http.MethodGet {
+						_, _ = io.WriteString(w, "x")
+					}
+				}
+			}
+			write := func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("ETag", `"abc"`)
+				w.Header().Set("Date", date.Format(layout))
+				w.WriteHeader(http.StatusOK)
+			}
+			want := storage.Object{Key: "k", Size: 1, ContentType: "text/plain", ETag: `"abc"`, ModifiedAt: lastModified}
+
+			svc := newService(t, byRoute(map[string]http.HandlerFunc{
+				"PUT " + testKeyPath:  write,
+				"GET " + testKeyPath:  head(`"abc"`),
+				"HEAD " + testKeyPath: head(`"abc"`),
+			}))
+			c := newClient(t, testConfig(t, svc.endpoint(), nil))
+			ctx := t.Context()
+
+			put, err := c.Put(ctx, "k", strings.NewReader("x"), storage.PutOptions{ContentType: "text/plain"})
+			if err != nil {
+				t.Fatalf("Put: %v", err)
+			}
+			if put != want {
+				t.Errorf("Put = %+v, want %+v", put, want)
+			}
+			blob, err := c.Get(ctx, "k", storage.GetOptions{})
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			_ = blob.Body.Close()
+			if blob.Object != want {
+				t.Errorf("Get = %+v, want %+v", blob.Object, want)
+			}
+			stat, err := c.Stat(ctx, "k")
+			if err != nil {
+				t.Fatalf("Stat: %v", err)
+			}
+			if stat != want {
+				t.Errorf("Stat = %+v, want %+v", stat, want)
+			}
+
+			// A HeadObject that reports another ETag leaves Put the Date.
+			replaced := newService(t, byRoute(map[string]http.HandlerFunc{
+				"PUT " + testKeyPath:  write,
+				"HEAD " + testKeyPath: head(`"other"`),
+			}))
+			c = newClient(t, testConfig(t, replaced.endpoint(), nil))
+			put, err = c.Put(ctx, "k", strings.NewReader("x"), storage.PutOptions{ContentType: "text/plain"})
+			if err != nil {
+				t.Fatalf("Put with a replaced object: %v", err)
+			}
+			if want := (storage.Object{Key: "k", Size: 1, ContentType: "text/plain", ETag: `"abc"`, ModifiedAt: date}); put != want {
+				t.Errorf("Put with a replaced object = %+v, want %+v, its ModifiedAt the Date", put, want)
+			}
+		})
 	}
 }
 

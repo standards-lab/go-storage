@@ -52,6 +52,11 @@ const defaultContentType = "application/octet-stream"
 // ETag because a concurrent writer replaced the object, the object is still
 // written: Put succeeds and takes ModifiedAt from the write answer's Date
 // header instead.
+//
+// Put, Get, and Stat convert the header time they read to UTC: the SDK
+// parses an IMF-fixdate in UTC, but its fallback to an RFC 850 date places
+// it in a fixed "GMT" zone, or in time.Local on a host whose zone
+// abbreviates GMT, and the contract asks for UTC whatever the format.
 func (c *Client) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
 	if err := validateKey(key); err != nil {
 		return storage.Object{}, err
@@ -106,9 +111,9 @@ func (c *Client) Put(ctx context.Context, key string, body io.Reader, opts stora
 
 	head, headErr := c.s3.HeadObject(ctx, &awss3.HeadObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)})
 	if headErr == nil && entityTag(head.ETag) == obj.ETag {
-		obj.ModifiedAt = aws.ToTime(head.LastModified)
+		obj.ModifiedAt = aws.ToTime(head.LastModified).UTC()
 	} else if date, ok := awsmiddleware.GetServerTime(meta); ok {
-		obj.ModifiedAt = date
+		obj.ModifiedAt = date.UTC()
 	}
 	return obj, nil
 }
@@ -238,7 +243,7 @@ func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (sto
 		Size:        aws.ToInt64(out.ContentLength),
 		ContentType: aws.ToString(out.ContentType),
 		ETag:        entityTag(out.ETag),
-		ModifiedAt:  aws.ToTime(out.LastModified),
+		ModifiedAt:  aws.ToTime(out.LastModified).UTC(),
 		Body:        classifiedBody{body},
 	}, nil
 }
@@ -414,7 +419,7 @@ func (c *Client) Stat(ctx context.Context, key string) (storage.Object, error) {
 		Size:        aws.ToInt64(out.ContentLength),
 		ContentType: aws.ToString(out.ContentType),
 		ETag:        entityTag(out.ETag),
-		ModifiedAt:  aws.ToTime(out.LastModified),
+		ModifiedAt:  aws.ToTime(out.LastModified).UTC(),
 	}, nil
 }
 

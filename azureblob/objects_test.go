@@ -53,23 +53,14 @@ func newFailAfter(n int, err error) *failAfter {
 	return &failAfter{r: bytes.NewReader(bytes.Repeat([]byte("x"), n)), err: err}
 }
 
-// wantObject asserts obj carries the scripted metadata for key and size.
+// wantObject asserts obj is the whole of the scripted metadata for key, size,
+// and contentType. The comparison is ==, so a ModifiedAt at the scripted
+// instant but outside time.UTC fails it.
 func wantObject(t *testing.T, what string, obj storage.Object, key string, size int64, contentType string) {
 	t.Helper()
-	if obj.Key != key {
-		t.Errorf("%s Key = %q, want %q", what, obj.Key, key)
-	}
-	if obj.Size != size {
-		t.Errorf("%s Size = %d, want %d", what, obj.Size, size)
-	}
-	if obj.ContentType != contentType {
-		t.Errorf("%s ContentType = %q, want %q", what, obj.ContentType, contentType)
-	}
-	if obj.ETag != testETag {
-		t.Errorf("%s ETag = %q, want %q as the service sent it", what, obj.ETag, testETag)
-	}
-	if !obj.ModifiedAt.Equal(testModifiedAt) {
-		t.Errorf("%s ModifiedAt = %v, want %v", what, obj.ModifiedAt, testModifiedAt)
+	want := storage.Object{Key: key, Size: size, ContentType: contentType, ETag: testETag, ModifiedAt: testModifiedAt}
+	if obj != want {
+		t.Errorf("%s = %+v, want %+v", what, obj, want)
 	}
 }
 
@@ -801,8 +792,9 @@ func TestList_Paging(t *testing.T) {
 	if got := first.Objects[0]; got != want {
 		t.Errorf("first object = %+v, want %+v", got, want)
 	}
-	if got := first.Objects[1]; got.Key != "p/b" || got.Size != 4 || got.ContentType != "application/json" || got.ETag != `"0x2"` {
-		t.Errorf("second object = %+v, want p/b, 4 bytes, application/json, \"0x2\"", got)
+	want = storage.Object{Key: "p/b", Size: 4, ContentType: "application/json", ETag: `"0x2"`, ModifiedAt: testModifiedAt}
+	if got := first.Objects[1]; got != want {
+		t.Errorf("second object = %+v, want %+v", got, want)
 	}
 
 	second, err := c.List(t.Context(), storage.ListOptions{Prefix: "p/", Token: first.Next, Limit: 2})

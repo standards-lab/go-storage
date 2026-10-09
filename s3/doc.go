@@ -134,7 +134,8 @@
 // quotes to a value a gateway sends without them, so Put, Get, Stat, and
 // List agree on one version's ETag. A listing's LastModified is truncated
 // to the whole second, the precision of the Last-Modified header the
-// others read.
+// others read, and every operation reports ModifiedAt in UTC, whatever the
+// date format the gateway sends.
 //
 // # Dependencies
 //

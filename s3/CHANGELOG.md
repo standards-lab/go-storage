@@ -41,7 +41,9 @@ changelog covers this sub-module only; the base module keeps its own.
   integer from 1 to 32. Unset means 4. At the defaults a multipart `Put` reads at most 48 MiB of
   its body ahead of the acknowledged parts and holds up to 64 MiB while the upload starts; the
   package documentation counts the memory.
-- Requires `github.com/standards-lab/go-storage` v0.5.0.
+- Every operation reports `ModifiedAt` in UTC, whichever HTTP date format the gateway sends:
+  `Put`, from the `HeadObject` or from the write answer's `Date`, `Get`, `Stat`, and `List`.
+- Requires `github.com/standards-lab/go-storage` v0.6.0.
 
 [Unreleased]: https://github.com/standards-lab/go-storage/compare/s3/v0.1.0...HEAD
 [v0.1.0]: https://github.com/standards-lab/go-storage/releases/tag/s3/v0.1.0

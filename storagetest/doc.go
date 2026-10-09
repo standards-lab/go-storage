@@ -12,7 +12,7 @@
 //
 //   - [WithCapabilities] replaces the default key rules, whose length cap
 //     is [DefaultMaxKeyLength].
-//   - [WithClock] sets the clock that stamps ModifiedAt.
+//   - [WithClock] sets the clock that stamps ModifiedAt, in UTC.
 //   - [WithPageSize] sets the page size of a List without a Limit.
 //   - [WithoutContainer] starts the Fake with no container.
 //

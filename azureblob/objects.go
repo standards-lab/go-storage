@@ -8,6 +8,7 @@ import (
 	"math"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
@@ -49,7 +50,7 @@ func (c *Client) Put(ctx context.Context, key string, body io.Reader, opts stora
 		Size:        tracked.n.Load(),
 		ContentType: contentType,
 		ETag:        entityTag(resp.ETag),
-		ModifiedAt:  deref(resp.LastModified),
+		ModifiedAt:  modifiedAt(resp.LastModified),
 	}, nil
 }
 
@@ -75,7 +76,7 @@ func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (sto
 		Size:        deref(resp.ContentLength),
 		ContentType: deref(resp.ContentType),
 		ETag:        entityTag(resp.ETag),
-		ModifiedAt:  deref(resp.LastModified),
+		ModifiedAt:  modifiedAt(resp.LastModified),
 		Body:        classifiedBody{c.resuming(ctx, resp)},
 	}, nil
 }
@@ -115,7 +116,7 @@ func (c *Client) Stat(ctx context.Context, key string) (storage.Object, error) {
 		Size:        deref(resp.ContentLength),
 		ContentType: deref(resp.ContentType),
 		ETag:        entityTag(resp.ETag),
-		ModifiedAt:  deref(resp.LastModified),
+		ModifiedAt:  modifiedAt(resp.LastModified),
 	}, nil
 }
 
@@ -165,9 +166,9 @@ func (c *Client) List(ctx context.Context, opts storage.ListOptions) (storage.Pa
 			obj.ContentType = deref(p.ContentType)
 			obj.ETag = entityTag(p.ETag)
 			// azcore parses a listing's RFC 7231 time in a fixed GMT zone
-			// since v1.23.2; UTC keeps List's ModifiedAt identical to the
-			// one Put, Get, and Stat report from the response headers.
-			obj.ModifiedAt = deref(p.LastModified).UTC()
+			// since v1.23.2; modifiedAt converts it to UTC, as it does the
+			// header time Put, Get, and Stat report.
+			obj.ModifiedAt = modifiedAt(p.LastModified)
 		}
 		page.Objects = append(page.Objects, obj)
 	}
@@ -250,6 +251,16 @@ func entityTag(e *azcore.ETag) string {
 		return s
 	}
 	return `"` + s + `"`
+}
+
+// modifiedAt returns the service's last-modified time in UTC, or the zero
+// time when the answer carried none. The SDK parses a Last-Modified header
+// with time.RFC1123, which places it in a fixed "GMT" zone, or in
+// time.Local on a host whose zone abbreviates GMT, such as Europe/London;
+// a listing's time comes in a fixed GMT zone too. The contract asks for
+// UTC on every path.
+func modifiedAt(t *time.Time) time.Time {
+	return deref(t).UTC()
 }
 
 // deref returns *p, or T's zero value when p is nil.
