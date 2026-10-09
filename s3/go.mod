@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager v0.4.15
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.2
 	github.com/aws/smithy-go v1.28.4
-	github.com/standards-lab/go-storage v0.5.0
+	github.com/standards-lab/go-storage v0.6.0
 )
 
 require (
@@ -20,5 +20,5 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.11.6 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.5 // indirect
-	github.com/standards-lab/go-core v0.6.0 // indirect
+	github.com/standards-lab/go-core v0.7.0 // indirect
 )

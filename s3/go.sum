@@ -36,7 +36,7 @@ github.com/aws/aws-sdk-go-v2/service/sts v1.51.3 h1:L5w+LXVzMaacz3iotdx2fWtU/O+T
 github.com/aws/aws-sdk-go-v2/service/sts v1.51.3/go.mod h1:8E586vK6OTj+qVzsTygGzw1GlZnOgNjul8toJEdtX5s=
 github.com/aws/smithy-go v1.28.4 h1:vzBmFpcRUtotqGPfmnro2W2Pgg3mk103n9sZhNJY9YU=
 github.com/aws/smithy-go v1.28.4/go.mod h1:YE2RhdIuDbA5E5bTdciG9KrW3+TiEONeUWCqxX9i1Fc=
-github.com/standards-lab/go-core v0.6.0 h1:Ywf+gyndx4+PV2DtzmAxsgnMJWIRS+RpQJhuvdUVq60=
-github.com/standards-lab/go-core v0.6.0/go.mod h1:Yl/R+gM9YWczsePBCKXdPGh3FSdZ/5i8SapLIh3BDHU=
-github.com/standards-lab/go-storage v0.5.0 h1:TNAWESyM9ZSDaDJwSzsU/dzvUDvFJjA4zkVvMtsiNJg=
-github.com/standards-lab/go-storage v0.5.0/go.mod h1:xJKCpbsOo/8pZzbmoxB3YCiJr1kskt7jkXmfS8JeGe8=
+github.com/standards-lab/go-core v0.7.0 h1:eVBSSZ3axkQfh0+iYfuim6oXiOBR+DRXHn4fzlEDP4E=
+github.com/standards-lab/go-core v0.7.0/go.mod h1:Yl/R+gM9YWczsePBCKXdPGh3FSdZ/5i8SapLIh3BDHU=
+github.com/standards-lab/go-storage v0.6.0 h1:QGuZgshPPzhBhZpWmWh0U8yqNHR+6dxjXHirEOIuuss=
+github.com/standards-lab/go-storage v0.6.0/go.mod h1:205dVOS4pLz4hhcFxw41v1BkNy7Zl/97WM/DylHPXyM=
