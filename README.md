@@ -8,7 +8,8 @@ test support a provider proves itself against.
 
 `github.com/standards-lab/go-storage` is the base module. Provider sub-modules are nested modules
 that pin their SDKs and are released on their own tags: `azureblob` is the Azure Blob Storage
-provider, and `s3` is the S3 provider.
+provider, and `s3`, the second provider, is the S3 provider. Both pass the conformance suite,
+which validates the standard tier.
 
 ## Standard
 
@@ -19,6 +20,13 @@ the standard's principles it enhances are stated below. Its repository-level pri
 
 - The base module depends on the standard library and `go-core` alone. A provider's SDK lives in
   that provider's own sub-module, and the base module never imports it.
+- `s3` pins aws-sdk-go-v2's `feature/s3/transfermanager`, the S3 SDK's transfer companion, for
+  multipart upload, as a stated v0 exception. AWS has not released it past v0, and it passes
+  every other marker of an industry-standard library. It solves a specification, S3's multipart
+  upload protocol. `Put` hides it behind `io.Reader` and `context.Context`, so it can be removed
+  without touching callers. It adds no module beyond the SDK modules `s3` already compiles. The
+  project that defines the ecosystem maintains it, as the successor to the deprecated
+  `feature/s3/manager`. A v0 minor may change its API, so an upgrade is checked against `Put`.
 - Limits are application policy. `MaxObjectSize` and `ListPageSize` have no default, and the
   application supplies them. The two defaults bound what no caller controls: `RequestTimeout`
   bounds the calls `Store` makes on its own behalf in `Start` and `Ready`, and `ReadIdleTimeout`
@@ -59,15 +67,20 @@ mise run upgrade    # upgrade every module's go directive and requirements, and 
 ```
 
 The unit tests need no service. Each provider's acceptance tests run the conformance suite against
-a real service when its endpoint variable is set, and skip otherwise. `azureblob`'s tests read
-`AZUREBLOB_TEST_ENDPOINT`; CI runs them against Azurite, and the package documentation of
-`azureblob` shows how to start it locally. `s3`'s tests read `S3_TEST_ENDPOINT`; CI runs them
-against SeaweedFS, and locally they run against the same image:
+a real service when its endpoint variable is set, and skip otherwise: `azureblob`'s read
+`AZUREBLOB_TEST_ENDPOINT` and `s3`'s read `S3_TEST_ENDPOINT`. The acceptance harness is a compose
+stack with one service per provider, Azurite and SeaweedFS, each keeping its data on tmpfs, so
+every start is empty. Each service builds from `compose/<service>/Dockerfile`, whose `FROM` line
+is its one image pin and which carries its configuration and health check. `SEAWEEDFS_PORT` and
+`AZURITE_BLOB_PORT` move the published ports off 8333 and 10000, and the acceptance tasks'
+endpoints follow them. CI runs the same `acceptance` task:
 
 ```
-mise run seaweedfs:start   # start SeaweedFS and wait until its S3 gateway answers
-mise run acceptance        # run s3's tests, acceptance included, against it
-mise run seaweedfs:stop    # stop SeaweedFS and discard its data
+mise run up                    # start every harness service and wait until each is healthy
+mise run down                  # stop the harness, discarding its data
+mise run acceptance            # run every provider's acceptance tests, each against a fresh service
+mise run acceptance:s3         # run s3's tests, acceptance included, against SeaweedFS
+mise run acceptance:azureblob  # run azureblob's tests, acceptance included, against Azurite
 ```
 
 ## License

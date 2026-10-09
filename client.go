@@ -25,7 +25,8 @@ type Object struct {
 	ETag string
 
 	// ModifiedAt is the time the provider recorded for the object's last
-	// write.
+	// write, in time.UTC, whatever time.Local is, so two reports of one
+	// write compare equal with == as well as with Equal.
 	ModifiedAt time.Time
 }
 

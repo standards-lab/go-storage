@@ -8,8 +8,8 @@ suite, with each provider isolated in its own sub-module.
 The README, `docs/design.md`, and each package's `doc.go` document this repository. The
 [Go Elemental](https://github.com/standards-lab/architecture/blob/main/standards/go-elemental/README.md)
 standard states the principles it follows. This context records only working knowledge the code
-and the documentation do not express. `provider-assumptions.md` lists the claims no build has
-proven.
+and the documentation do not express. `provider-assumptions.md` lists the provider claims no run
+against the live service has proven, and the tests that cover each.
 
 ## Capability map
 
@@ -22,12 +22,12 @@ unbuilt is added when it is about to be built.
 - **`azureblob`**: the Azure Blob Storage provider sub-module.
 - **`s3`**: the S3 provider sub-module.
 
-## Known limits of the adapter
+## Known limits of the adapters
 
-- `Delete` sends no snapshot option, so a blob that has snapshots fails with a 409. Nothing in
-  this repository creates a snapshot.
+- `azureblob`'s `Delete` sends no snapshot option, so a blob that has snapshots fails with a 409.
+  Nothing in this repository creates a snapshot.
 
 ## Not built
 
-- **Managed identity.** The provider authenticates with the account's shared key, and the
+- **Managed identity.** `azureblob` authenticates with the account's shared key, and the
   deployment goal brings managed identity.

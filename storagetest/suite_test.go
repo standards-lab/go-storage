@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-storage/storagetest"
@@ -268,6 +269,43 @@ func (c *noDefaultContentType) Put(ctx context.Context, key string, body io.Read
 	return obj, err
 }
 
+// nonUTCModifiedAt reports Put's, Get's, and Stat's ModifiedAt in a fixed
+// GMT zone, the way a provider does that keeps the zone its SDK parsed an
+// RFC 1123 header in. The instant is unchanged, so only the zone check
+// catches it.
+type nonUTCModifiedAt struct{ *storagetest.Fake }
+
+var gmt = time.FixedZone("GMT", 0)
+
+func (c *nonUTCModifiedAt) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
+	obj, err := c.Fake.Put(ctx, key, body, opts)
+	obj.ModifiedAt = obj.ModifiedAt.In(gmt)
+	return obj, err
+}
+
+func (c *nonUTCModifiedAt) Get(ctx context.Context, key string, opts storage.GetOptions) (storage.Blob, error) {
+	blob, err := c.Fake.Get(ctx, key, opts)
+	blob.ModifiedAt = blob.ModifiedAt.In(gmt)
+	return blob, err
+}
+
+func (c *nonUTCModifiedAt) Stat(ctx context.Context, key string) (storage.Object, error) {
+	obj, err := c.Fake.Stat(ctx, key)
+	obj.ModifiedAt = obj.ModifiedAt.In(gmt)
+	return obj, err
+}
+
+// nonUTCListModifiedAt reports List's ModifiedAt in a fixed GMT zone.
+type nonUTCListModifiedAt struct{ *storagetest.Fake }
+
+func (c *nonUTCListModifiedAt) List(ctx context.Context, opts storage.ListOptions) (storage.Page, error) {
+	page, err := c.Fake.List(ctx, opts)
+	for i := range page.Objects {
+		page.Objects[i].ModifiedAt = page.Objects[i].ModifiedAt.In(gmt)
+	}
+	return page, err
+}
+
 // brokenClients are the clients TestRun_CatchesBrokenClients runs the suite
 // over, each named for the contract it breaks, with the suite case that
 // must fail it.
@@ -303,6 +341,8 @@ var brokenClients = []struct {
 		return &alsoClassifies{storagetest.NewFake(), storage.ErrUnavailable}
 	}, "MissingKey"},
 	{"Put reports no ContentType when none was given", func() storage.Client { return &noDefaultContentType{storagetest.NewFake()} }, "PutUnknownSize"},
+	{"Put, Get, and Stat report ModifiedAt outside UTC", func() storage.Client { return &nonUTCModifiedAt{storagetest.NewFake()} }, "RoundTrip"},
+	{"List reports ModifiedAt outside UTC", func() storage.Client { return &nonUTCListModifiedAt{storagetest.NewFake()} }, "List"},
 }
 
 // Run fails the case that proves the contract a broken client breaks. As

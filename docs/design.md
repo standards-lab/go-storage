@@ -3,13 +3,15 @@
 This page explains why go-storage is shaped as it is. The package documentation states what each
 type does.
 
-## The standard tier is a proposal
+## The standard tier is validated by a second provider
 
 No formal standard exists for object storage, so the standard tier is derived from what the two
 target APIs, Azure Blob Storage and Amazon S3, share, and kept narrow. An interface is the least
-reversible thing a library ships: every provider implements it, and widening it breaks each one.
-The tier becomes a validated standard only once a second provider passes the `storagetest` suite.
-Until then it is a proposal.
+reversible thing a library ships: every provider implements it, and widening it breaks each one,
+so the tier counts as a standard only once a second provider passes the `storagetest` suite. Two
+providers pass it, `azureblob` against Azurite and `s3` against SeaweedFS's S3 gateway, with no
+gateway-specific code path. Neither has run against its live service;
+`context/provider-assumptions.md` lists the claims that rest on that.
 
 Object storage is protocol-driven, not DSL-driven: a consumer calls operations with typed
 arguments, and there is no text artifact and no dialect.
@@ -69,20 +71,35 @@ three values, holding no policy or state, so the admin surface lives in the cons
 ## Configuration
 
 `Container`, not `Bucket`: the standard tier takes neither provider's vocabulary. Credentials are
-the account's shared key, which keeps `azidentity` and MSAL out of `azureblob` until a deployment
-needs managed identity. `MaxObjectSize` and `ListPageSize` have no default because a library ships
-no policy numbers; 0 means unset, and pointer fields were rejected because an explicit zero means
-nothing different. `RequestTimeout` has a default because it bounds only the calls `Store` makes
-for itself; one timeout over every operation would cut off a large upload. `ReadIdleTimeout` has
-a default because it bounds only the store's side of a download: the clock runs while a read of a
-`Get`'s body is in progress, never between reads, so a slow client's download is never cut off.
-A per-request deadline on the object operations belongs to the provider's transport instead:
-`azureblob`'s `try_timeout` is that deadline, so a stalled store cannot hold a request
-indefinitely. It bounds each try of a `Put`, a metadata call, or a `Get`'s body, not the whole
-call with its retries. The SDK's retry reader resumes a `Get`'s body past a try's deadline, so
-`try_timeout` is sized for one operation while a download runs as long as its caller reads.
-`ReadIdleTimeout` bounds each read including its resumptions, so it is set above `try_timeout`,
-which lets a stalled try resume once before the store cuts the read off.
+a static key, Azure's account shared key or S3's access key, which keeps `azidentity` and MSAL
+out of `azureblob` until a deployment needs managed identity. `MaxObjectSize` and `ListPageSize`
+have no default because a library ships no policy numbers; 0 means unset, and pointer fields were
+rejected because an explicit zero means nothing different. `RequestTimeout` has a default
+because it bounds only the calls `Store` makes for itself; one timeout over every operation would
+cut off a large upload. `ReadIdleTimeout` has a default because it bounds only the store's side of
+a download: the clock runs while a read of a `Get`'s body is in progress, never between reads, so
+a slow client's download is never cut off.
+
+A per-request deadline on the object operations belongs to the provider's transport instead: each
+provider's `try_timeout` is that deadline, so a stalled store cannot hold a request indefinitely. It
+bounds each try of a `Put`, a metadata call, or a `Get`'s body, not the whole call with its retries;
+unset, as in the SDKs, a try has no deadline. `azureblob` sets it as the Azure SDK's per-try
+timeout. `s3` sets it as the standard-library HTTP client's timeout, which runs from a try's send to
+the last byte of its answer, so it covers a `GetObject` together with the read of its body; a
+timed-out try is a connection failure the SDK's retryer already retries. A `Get`'s body resumes past
+a try's deadline, or a lost connection, with a ranged request from its offset conditioned on the
+first answer's ETag: the Azure SDK's retry reader does it for `azureblob`, and `s3` does it itself,
+modelled on that reader. Either way `try_timeout` is sized for one operation while a download runs
+as long as its caller reads, and an object replaced before a resumption fails the read with
+`ErrNotFound`, because the version being read is gone. `ReadIdleTimeout` bounds each read including
+its resumptions, so it is set above `try_timeout`, which lets a stalled try resume once before the
+store cuts the read off.
+
+A resumed read is not validated by checksum. The AWS SDK validates a body's checksum only once it
+has read the whole object's body, and a ranged answer carries none for the object, so on `s3` a
+read that resumes is unvalidated, the bytes before the resumption as well as those after. The
+ETag condition still holds every byte to one version of the object; a consumer that needs
+end-to-end integrity keeps its own digest in the owning row.
 
 `azureblob`'s upload defaults trade memory for requests. A 4 MiB block is four times the SDK's
 1 MiB floor, so a multi-block body takes a quarter of the requests while the service's
@@ -92,6 +109,18 @@ version 2019-12-12, and the worker ceiling of 32 already reaches 128 MiB per `Pu
 block. The SDK allocates each block buffer with an anonymous mmap as it is needed, so a body
 shorter than one block holds one buffer. A process holds up to that per-`Put` figure once for each
 of its concurrent `Put`s.
+
+`s3`'s upload defaults make the same trade within S3's limits. An 8 MiB part is above S3's 5 MiB
+floor, and at the service's 10,000-part limit admits a body of unknown size up to 80 GiB; a
+declared `Size` raises the part size as far as it needs. The part ceiling is S3's 5 GiB. Four
+parts in flight, within the same 1 to 32 as `azureblob`'s workers, overlap request latency. A
+`Put` holds more memory than on `azureblob`. A part is twice a block, transfermanager reads ahead
+of the parts in flight, and while the upload starts, `Put`'s own buffer, which decides between one
+`PutObject` and a multipart upload, is still held beside transfermanager's. The package
+documentation counts the bytes: at the defaults a multipart `Put` reads 48 MiB ahead of the parts
+the service has acknowledged and holds up to 64 MiB while it starts. A body of at most one part is
+one `PutObject` sent from that buffer. As with `azureblob`, a process holds the per-`Put` figure
+once for each of its concurrent `Put`s.
 
 ## Swapping providers
 
@@ -119,3 +148,14 @@ row marked available. Delete mirrors it. Writing the object first was rejected, 
 insert then leaves an object that only a full container listing can find, while a pending row is
 an ordinary query. A crash between the two phases leaves a pending row, and nothing reconciles it.
 The row and its schema belong to the consumer.
+
+A crash during a multipart `Put` on S3 leaves more than a pending row. `Put` aborts a multipart
+upload that fails while the process runs, the caller's cancellation included, but a process
+killed mid-upload never aborts it, and no one keeps its upload ID: a retried `Put` starts an
+upload of its own, and `Delete` of the key cannot reach the old one. The orphan is invisible to
+`Get`, `Stat`, and `List`, and its parts stay stored, and on AWS billed, until a bucket lifecycle
+rule with `AbortIncompleteMultipartUpload` or a `ListMultipartUploads` sweep frees it. A bucket
+that takes multipart uploads therefore carries that lifecycle rule, with a `DaysAfterInitiation`
+beyond the longest upload. `EnsureContainer` never configures a bucket, so the rule is set where
+the bucket is provisioned. Azure documents no counterpart to configure: it discards a blob's
+uncommitted blocks itself after a week.

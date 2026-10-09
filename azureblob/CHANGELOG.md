@@ -8,11 +8,22 @@ sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-10-09
+
 ### Changed
 
-- **Breaking:** The `go-storage` requirement is v0.5.0, which requires `go-core` v0.6.0. An
+- **Breaking:** The `go-storage` requirement is v0.6.0, which requires `go-core` v0.7.0. An
   importer still on go-core's `lifecycle.Service`, `Add`, or stages breaks, since the
-  requirement pulls go-core v0.6.0 into its build.
+  requirement pulls go-core v0.6.0's lifecycle into its build.
+- The acceptance tests run locally with `mise run acceptance:azureblob`, against Azurite built
+  from `compose/azurite/Dockerfile`, the same task CI runs.
+
+### Fixed
+
+- `Put`, `Get`, and `Stat` report `ModifiedAt` in `time.UTC`, as `List` does. They reported it
+  in the fixed `GMT` zone the SDK parses a `Last-Modified` header in, or in `time.Local` on a
+  host whose zone abbreviates GMT, such as Europe/London, so one version's `ModifiedAt` differed
+  by `==` between `List` and the other calls.
 
 ## [v0.4.0] - 2026-09-30
 
@@ -110,7 +121,8 @@ sub-module only; the base module keeps its own.
   against a real service, gated on `AZUREBLOB_TEST_ENDPOINT` so they skip on the unit tier.
 - Requires `github.com/standards-lab/go-storage` v0.1.0.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/azureblob/v0.4.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/azureblob/v0.5.0...HEAD
+[v0.5.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.5.0
 [v0.4.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.2.0

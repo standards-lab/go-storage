@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
@@ -20,9 +22,11 @@ import (
 // The Options keys this package reads. See the package documentation for
 // their values.
 const (
-	optionRegion     = "region"
-	optionMaxRetries = "max_retries"
-	optionPartSize   = "part_size"
+	optionRegion      = "region"
+	optionMaxRetries  = "max_retries"
+	optionPartSize    = "part_size"
+	optionTryTimeout  = "try_timeout"
+	optionConcurrency = "concurrency"
 )
 
 // The part_size option's default and bounds. S3 refuses a part, the last
@@ -31,6 +35,13 @@ const (
 	defaultPartSize int64 = 8 << 20
 	minPartSize     int64 = 5 << 20
 	maxPartSize     int64 = 5 << 30
+)
+
+// The concurrency option's default and bounds: how many parts of one
+// multipart upload are in flight at once.
+const (
+	defaultConcurrency = 4
+	maxConcurrency     = 32
 )
 
 // abortTimeout bounds the AbortMultipartUpload that follows a failed
@@ -52,6 +63,9 @@ type Client struct {
 	bucket   string
 	region   string
 	partSize int64
+	// readRetries is how many times per read a Get's body resumes after a
+	// failed read: as many as the SDK retries each request.
+	readRetries int
 }
 
 // New constructs a Client from a finalized config without I/O, as the
@@ -87,13 +101,34 @@ func New(cfg storage.Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	tryTimeout, err := tryTimeoutOption(cfg.Options)
+	if err != nil {
+		return nil, err
+	}
+	concurrency, err := concurrencyOption(cfg.Options)
+	if err != nil {
+		return nil, err
+	}
 
-	// awss3.New, unlike config.LoadDefaultConfig, reads no environment
-	// variable or shared file, so the Config is the client's only input.
+	// awss3.New, unlike config.LoadDefaultConfig, loads no shared config or
+	// credentials file and takes none of these options from the
+	// environment, so the Config sets every option it builds. The SDK does
+	// still read environment variables of its own: the standard retryer
+	// reads AWS_NEW_RETRIES_2026, which changes its backoff and retry-quota
+	// defaults, and request middleware reads a few that only shape headers
+	// such as the user agent.
 	opts := awss3.Options{
 		Region:           region,
 		Credentials:      credentials.NewStaticCredentialsProvider(cfg.Account, cfg.Key, ""),
 		RetryMaxAttempts: attempts,
+	}
+	if tryTimeout > 0 {
+		// The HTTP client's own timeout bounds each try from its send to
+		// the last byte of its answer. A try that runs past it fails with a
+		// timeout the standard retryer treats as a retryable connection
+		// error, and classify maps the last one to storage.ErrUnavailable.
+		// The buildable client keeps the SDK's default transport settings.
+		opts.HTTPClient = awshttp.NewBuildableClient().WithTimeout(tryTimeout)
 	}
 	if cfg.Endpoint != "" {
 		if err := validateEndpoint(cfg.Endpoint); err != nil {
@@ -106,14 +141,25 @@ func New(cfg storage.Config) (*Client, error) {
 	// The threshold equal to the part size makes transfermanager take any
 	// body of at least one part as a multipart upload; Put sends a smaller
 	// one as a PutObject itself, so it only hands over a body longer than
-	// a part. FailTimeout gives the abort after a failure a fresh context,
-	// so the caller's cancellation does not cancel the abort too.
+	// a part. Concurrency is the number of workers that send parts, so it
+	// bounds the UploadPart requests in flight; transfermanager also keeps
+	// a pool of Concurrency+1 part buffers for them. FailTimeout gives the
+	// abort after a failure a fresh context, so the caller's cancellation
+	// does not cancel the abort too.
 	uploader := transfermanager.New(client, func(o *transfermanager.Options) {
 		o.PartSizeBytes = partSize
 		o.MultipartUploadThreshold = partSize
+		o.Concurrency = concurrency
 		o.FailTimeout = abortTimeout
 	})
-	return &Client{s3: client, uploader: uploader, bucket: cfg.Container, region: region, partSize: partSize}, nil
+	return &Client{
+		s3:          client,
+		uploader:    uploader,
+		bucket:      cfg.Container,
+		region:      region,
+		partSize:    partSize,
+		readRetries: readRetries(attempts),
+	}, nil
 }
 
 // regionOption reads the region option, applying the default for an unset
@@ -144,6 +190,17 @@ func maxAttempts(options map[string]string) (int, error) {
 	return n + 1, nil
 }
 
+// readRetries returns how many retries the SDK's retryer allows a request
+// of the given RetryMaxAttempts: the standard retryer's default attempts
+// less the first when attempts is 0 (unset), and attempts less the first
+// otherwise.
+func readRetries(attempts int) int {
+	if attempts == 0 {
+		attempts = retry.DefaultMaxAttempts
+	}
+	return attempts - 1
+}
+
 // partSizeOption reads the part_size option as a whole number of bytes
 // within the bounds S3 sets on a part, applying the default for an unset
 // key.
@@ -155,6 +212,34 @@ func partSizeOption(options map[string]string) (int64, error) {
 	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil || n < minPartSize || n > maxPartSize {
 		return 0, fmt.Errorf("s3: option %s: %q is not a byte count from %d (5 MiB) to %d (5 GiB)", optionPartSize, v, minPartSize, maxPartSize)
+	}
+	return n, nil
+}
+
+// tryTimeoutOption reads the try_timeout option as a positive duration. An
+// unset key returns 0, which New reads as "no deadline on a try".
+func tryTimeoutOption(options map[string]string) (time.Duration, error) {
+	v, ok := options[optionTryTimeout]
+	if !ok {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("s3: option %s: %q is not a positive duration", optionTryTimeout, v)
+	}
+	return d, nil
+}
+
+// concurrencyOption reads the concurrency option as an integer from 1 to
+// maxConcurrency, applying the default for an unset key.
+func concurrencyOption(options map[string]string) (int, error) {
+	v, ok := options[optionConcurrency]
+	if !ok {
+		return defaultConcurrency, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > maxConcurrency {
+		return 0, fmt.Errorf("s3: option %s: %q is not an integer between 1 and %d", optionConcurrency, v, maxConcurrency)
 	}
 	return n, nil
 }

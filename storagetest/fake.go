@@ -105,8 +105,8 @@ type object struct {
 // Option configures a Fake at construction.
 type Option func(*Fake)
 
-// WithClock supplies the time stamped on every Put as ModifiedAt. The default
-// is time.Now.
+// WithClock supplies the time stamped on every Put as ModifiedAt, which the
+// Fake converts to UTC as the contract requires. The default is time.Now.
 func WithClock(now func() time.Time) Option {
 	return func(f *Fake) { f.now = now }
 }
@@ -218,20 +218,20 @@ func (f *Fake) LastPut() (storage.PutOptions, int64) {
 	return f.lastPutOpts, f.lastPutConsumed
 }
 
-// LastEnsure reports the deadline of the context the most recent
+// LastEnsure reports the deadline, in UTC, of the context the most recent
 // EnsureContainer received, and whether that context carried one.
 func (f *Fake) LastEnsure() (time.Time, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.lastEnsureDeadline, f.lastEnsureBounded
+	return f.lastEnsureDeadline.UTC(), f.lastEnsureBounded
 }
 
-// LastProbe reports the deadline of the context the most recent Probe
-// received, and whether that context carried one.
+// LastProbe reports the deadline, in UTC, of the context the most recent
+// Probe received, and whether that context carried one.
 func (f *Fake) LastProbe() (time.Time, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.lastProbeDeadline, f.lastProbeBounded
+	return f.lastProbeDeadline.UTC(), f.lastProbeBounded
 }
 
 // LastList reports the options of the most recent List call.
@@ -292,7 +292,7 @@ func (f *Fake) Put(_ context.Context, key string, body io.Reader, opts storage.P
 			Size:        int64(len(data)),
 			ContentType: contentType,
 			ETag:        `"` + hex.EncodeToString(sum[:]) + `"`,
-			ModifiedAt:  f.now(),
+			ModifiedAt:  f.now().UTC(),
 		},
 		data: data,
 	}
