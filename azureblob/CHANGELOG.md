@@ -20,10 +20,10 @@ sub-module only; the base module keeps its own.
 
 ### Fixed
 
-- `Put`, `Get`, and `Stat` report `ModifiedAt` in `time.UTC`, as `List` does. They reported it in the
-  fixed `GMT` zone the SDK parses a `Last-Modified` header in, or in `time.Local` on a host whose
-  zone abbreviates GMT, such as Europe/London, so one version's `ModifiedAt` differed by `==`
-  between `List` and the other calls.
+- `Put`, `Get`, and `Stat` report `ModifiedAt` in `time.UTC`, as `List` does. They reported it
+  in the fixed `GMT` zone the SDK parses a `Last-Modified` header in, or in `time.Local` on a
+  host whose zone abbreviates GMT, such as Europe/London, so one version's `ModifiedAt` differed
+  by `==` between `List` and the other calls.
 
 ## [v0.4.0] - 2026-09-30
 

@@ -73,13 +73,13 @@ Out of scope  Put's buffering; transfermanager's log output; archived spikes;
 Door          two-way through slice 24; one-way at SHIP: every tag below is
               pinned by the module proxy and checksum database
 Release       go-core v0.7.0
-              sqlate v0.5.0, postgres/v0.5.0, sqlint/v0.2.2
+              sqlate v0.5.0, postgres/v0.5.0, sqlint/v0.3.0
               go-database v0.8.0, postgres/v0.5.0
               go-observability v0.2.0, otlp/v0.2.0
-              go-web-sdk v0.15.1, middleware/rate-limit/v0.2.1
+              go-web-sdk v0.15.1, middleware/rate-limit/v0.3.0
               go-storage v0.6.0, azureblob/v0.5.0, s3/v0.1.0
               blobfs v0.6.0, postgres/v0.4.0
-              go-web-sdk-template template/v0.3.1
+              go-web-sdk-template template/v0.12.1
 ```
 
 Version rule applied (for approval with the Release line): minor where returned times change
@@ -91,7 +91,7 @@ azureblob's go-storage v0.5.0 entry); patch where only a non-breaking requiremen
 
 ## Progress
 
-slices 14/24 committed (go-storage: d3b165f, 8afbb0d, 13179c2, 4c12efe, 22fc733, 445b840, 521f571, 341cd14; sqlate: a6e772f, 87b176d; blobfs: 3e5290f, 45c1260; go-web-service: ef628fe, b5695a1) · reviews of 1–14: standards ✓, spec ✓, editor ✓ · reviews of 15–24: standards — · spec — · editor —
+slices 24/24 committed (24 folded into validation) (go-observability: 394e40d, a165dd0; go-web-sdk: 7e470e5, 585349b; go-web-sdk-template: 051e104; blobfs (release prep): e7ee001; go-core: 716ce22, cb7ac10; go-database: b762ca6, 1a54054, cc46f4d; go-observability: 394e40d; go-web-sdk: 7e470e5; go-storage: d3b165f, 8afbb0d, 13179c2, 4c12efe, 22fc733, 445b840, 521f571, 341cd14, dea7739; sqlate: a6e772f, 87b176d, f191d3d, cf825d6, fd6c5df; blobfs: 3e5290f, 45c1260; go-web-service: ef628fe, b5695a1) · reviews of 1–14: standards ✓, spec ✓, editor ✓ · reviews of 15–24: standards ✓ (go-core decc346; sqlate 237db5b, 9711b30; go-database 7eed8d6; go-observability 7c44d2d; go-web-sdk 8135b87; template 4543c21; go-storage db8ea20; blobfs b17ac48) · spec ✓ (gap closed: blobfs fe7a707) · editor ✓
 
 ## Decisions
 
@@ -159,6 +159,29 @@ slices 14/24 committed (go-storage: d3b165f, 8afbb0d, 13179c2, 4c12efe, 22fc733,
 - hardening: versions are minor where returned times change or where a breaking requirement (go-core v0.6.0) is pulled into importers, patch where only a non-breaking requirement moves; go-web-service, an application, takes no tag.
 - hardening: SHIP walks the coordinator's order layer by layer; each layer bumps to the layer below's new tags, merges, passes ci, and tags before the next (architect: the session carries every currency update its releases cause).
 - hardening: no go-core clock abstraction; callers convert with .UTC().
+- hardening: go-observability's Shutdown releases its exporters when Start failed or never ran, since go-core v0.6.0's coordinator calls Shutdown after a failed Start; a nil guard alone would have leaked the otlp connections.
+- hardening: go-database's DB and admin.Service join go-core v0.6.0's graph with no adapter; only docs and assertions changed, and DB.Shutdown after a failed Start is tested.
+- hardening: go-core converts only the record's own time to UTC; time attributes a caller logs keep the Location the caller gave them.
+- hardening: sqlate's history upgrade is an optional migrate.HistoryUpgrader (check plus ALTER ... USING applied_at AT TIME ZONE 'UTC'), not new Catalog methods, so external dialects don't break; MySQL/MariaDB keep TIMESTAMP, which already stores an instant; old rows are read as UTC.
+- hardening: at SHIP, once sqlate/postgres requires sqlate v0.5.0, add `var _ migrate.HistoryUpgrader = Dialect{}` to postgres/dialect.go (it can't compile against v0.4.1 under GOWORK=off).
+- hardening: go-storage's suite also checks List's ModifiedAt Location, and the Fake's LastEnsure/LastProbe deadlines return UTC; provider tests run under Europe/London via TestMain.
+- hardening: go-database/postgres registers TimestamptzCodec{ScanLocation: UTC} through stdlib.OptionAfterConnect; pgx's timestamp codec already returns UTC; its test runs on the package's fake pgproto3 server (no real-Postgres tier there) in both wire formats.
+- hardening: middleware/rate-limit releases as v0.3.0, not the planned v0.2.1: its Unreleased already held an observable change (httprate v0.16.1 keys IPv4-mapped IPv6 clients by their IPv4 address), a minor by the version rule.
+- hardening: the template releases as template/v0.12.1, not v0.3.1: its tags already reach template/v0.12.0 (the brief's number was a planning error).
+- hardening: blobfs returns no time it builds itself (sweep's time.Now is a query argument), so its UTC guarantee comes entirely through sqlate v0.5.0; blobfs and go-observability changelogs don't record tooling or OpenTelemetry/grpc bumps, as before.
+- hardening: one test convention for UTC: a TestMain in main_test.go sets time.Local to Europe/London (time/tzdata imported); UTC tests use a London-summer instant, since a winter instant passes without conversion; one-write ModifiedAt is compared with == across calls.
+- hardening: Breaking marks an entry when a returned time.Time changes Location or a requirement pulls a breaking release into importers; requirement lines share one phrasing; changelogs name the requirements each module has at its tag, after SHIP's bumps.
+- hardening: sqlint releases as v0.3.0, not v0.2.2: its sqlate v0.5.0 requirement is breaking for importers, a tool directive included (version rule).
+- hardening: at SHIP, blobfs's bump to sqlate v0.5.0 adds a test that CreatedAt/UpdatedAt come back in time.UTC under London, and go-web-service's bump is proven by its integration tier against real Postgres (JSON times end in Z); neither can pass under GOWORK=off before the tags.
+- hardening: sqlate's Scanner and Scalar convert after their one Scan: a time.Time, a *time.Time (replaced with a fresh pointer, not written through), a valid sql.NullTime or sql.Null[time.Time], and a time in an untyped destination, through embedded structs; a hand-written ScanFunc is left to its author.
+- hardening: a sqlate cursor renders a keyed time as UTC text, so a row issues the same cursor on every host; a cursor issued before still continues, since the field's CAST reads its offset.
+- hardening: sqlate's history upgrade runs inside the lock, after create and before the history is read, on Up, Steps, Down, Reset, and Force; the check alone keeps it to one run, since a second ALTER would reread an aware column through the session's zone. A row written under a non-UTC session zone shifts by that offset, documented; the live proof runs its sessions in Asia/Tokyo.
+- hardening: go-storage's Fake converts an injected clock's reading to UTC; storagetest adds two GMT-zoned broken fixtures (Put/Get/Stat, and List) the suite must fail; s3 converts on every header path, Put's Date fallback and the SDK's RFC 850 parse included.
+- hardening: go-observability's Telemetry takes a lower layer by being a node the instrumented nodes use or order after with Scope.After, replacing the startup/shutdown hooks go-core v0.6.0 removed.
+- hardening: the template builds no time.Time outside its tests and emits only go-core's log record times, so it meets the UTC rule through go-core v0.7.0 with no code change.
+- hardening: UTC docs and changelog entries share one wording, "in time.UTC, whatever time.Local is", and a changelog entry for a converted time states the instant is unchanged.
+- hardening (spec review): blobfs/postgres v0.4.0's changelog names its sqlate/sqlint tool requirement, v0.3.0, the one gap the review found.
+- SHIP checklist: sqlate/postgres adds `var _ migrate.HistoryUpgrader = Dialect{}` once it requires sqlate v0.5.0; blobfs adds the CreatedAt/UpdatedAt UTC test under London with its sqlate v0.5.0 bump; blobfs/postgres and go-web-service bump the sqlint tool to v0.3.0; go-storage's providers re-run acceptance after requiring v0.6.0; go-web-service's integration tier proves its JSON times end in Z; changelog sections dated 2026-10-09 are re-dated if their tags land later.
 
 ## Pending edits
 
@@ -187,3 +210,47 @@ slices 14/24 committed (go-storage: d3b165f, 8afbb0d, 13179c2, 4c12efe, 22fc733,
 - architecture · standards/go-elemental/principles/dependencies.md, the "No provider in a base" bullet: "go-storage's `azureblob`" becomes "go-storage's `azureblob` and `s3`".
 - architecture · standards/go-elemental/principles/dependencies.md, "Sourcing", after the paragraph ending "as a stated v0 exception that passes every other marker.": add that go-storage's README admits `s3`'s `feature/s3/transfermanager` as a stated v0 exception in a provider sub-module, sourced under the specification category (S3's multipart upload protocol).
 - architecture · standards/go-elemental/README.md, the go-storage row: "with the Azure Blob provider as a sub-module" becomes "with the Azure Blob and S3 providers as sub-modules".
+- architecture · standards/go-elemental/principles/utc-times.md: new principle page:
+  "---
+  key: utc-times
+  name: Times in UTC
+  type: principle
+  level: go-elemental
+  ---
+
+  # Times in UTC
+
+  Every `time.Time` a Go Elemental library returns is in `time.UTC`, whatever `time.Local` or the database session's `TimeZone` is. JSON encoding, cursors, logs, and `==` then give the same result on every host.
+
+  ## PostgreSQL columns store instants
+
+  A PostgreSQL column that holds a point in time is `timestamp with time zone`, which stores an instant. [sqlate](https://github.com/standards-lab/sqlate)'s `postgres` dialect creates its migration history's `applied_at` the same way.
+
+  ## The read path converts to UTC
+
+  pgx decodes a `timestamp with time zone` into `time.Local`, and a session `TimeZone` setting does not change that, so two layers convert on read:
+
+  - [go-database](https://github.com/standards-lab/go-database)'s `postgres` provider registers pgx's `TimestamptzCodec` with `ScanLocation: time.UTC` on every connection it opens.
+  - sqlate's `query.Scanner` and `query.Scalar` convert every `time.Time` they scan to `time.UTC`, whatever driver produced it.
+
+  A library that parses a time from another source converts it before returning it, as [go-storage](https://github.com/standards-lab/go-storage)'s providers do with the HTTP dates behind `ModifiedAt`.
+
+  ## Log record times are UTC
+
+  [go-core](https://github.com/standards-lab/go-core)'s `logging.New` writes each record's own time in `time.UTC`. A time the caller logs as an attribute keeps the Location the caller gave it.
+
+  ## Tests prove UTC under a non-UTC zone
+
+  A test of a returned time runs with `time.Local` set to a zone other than UTC: the package's `TestMain`, in `main_test.go`, sets it to Europe/London and imports `time/tzdata`, so the zone loads without the host's zoneinfo. The test uses an instant in London's summer, since London's winter offset is zero and an unconverted time prints as a UTC one does. It compares whole values with `==`, which compares the Location as well as the instant.
+
+  ## Callers convert where a time leaves their code
+
+  The standard has no clock abstraction. Code that takes a time from `time.Now` or another source and hands it out, in a response body, a cursor, or a returned value, converts it with `.UTC()` at that point."
+- architecture · standards/go-elemental/principles/README.md: after "- [Timeouts and deadlines](timeouts.md)" add "- [Times in UTC](utc-times.md)".
+- architecture · standards/go-elemental/README.md, "## Principles": after the Timeouts and deadlines bullet add "- [Times in UTC](principles/utc-times.md) states that every time a library returns is in `time.UTC`, the columns and read path that keep it so, log record times, how tests prove it, and where a caller converts."
+- go-core · STANDARDS.md: after the `lifecycle-and-context.md` line add "- `architecture/standards/go-elemental/principles/utc-times.md`: `logging.New`'s handlers, which write each record's time in UTC."
+- sqlate · STANDARDS.md: after the `baseline-standards.md` line add "- `architecture/standards/go-elemental/principles/utc-times.md`: `query.Scanner` and `query.Scalar`, which return every time in UTC, a cursor's keyed time, and the `postgres` dialect's `timestamp with time zone` history."
+- go-database · STANDARDS.md: after the `baseline-standards.md` line add "- `architecture/standards/go-elemental/principles/utc-times.md`: `postgres.New`'s connections, which scan `timestamptz` in UTC."
+- go-storage · STANDARDS.md: after the `baseline-standards.md` line add "- `architecture/standards/go-elemental/principles/utc-times.md`: `Object.ModifiedAt` in the contract, `storagetest.Fake`, the conformance suite's Location checks, and the times `azureblob` and `s3` parse."
+- blobfs · STANDARDS.md: after the `baseline-standards.md` line add "- `architecture/standards/go-elemental/principles/utc-times.md`: `File`'s and `Directory`'s `CreatedAt` and `UpdatedAt`, read through sqlate's `query.Scanner`."
+- go-web-service · STANDARDS.md: after the `baseline-standards.md` line add "- `architecture/standards/go-elemental/principles/utc-times.md`: the times the API returns, which its integration tier proves end in `Z`."
