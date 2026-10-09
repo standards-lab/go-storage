@@ -68,8 +68,10 @@
 //     reads. With max_retries 0 the body does not resume. A body that
 //     stalls on every try fails the read with storage.ErrUnavailable once
 //     its resumptions are spent. try_timeout must exceed the longest part
-//     upload, and the time a Get body's reader may pause between reads
-//     without spending a resumption.
+//     upload and the time a Get body's reader may pause between reads
+//     without spending a resumption and, when a Store wraps the client,
+//     stay below storage.Config.ReadIdleTimeout, so a stalled try can
+//     resume before the store cuts the read off.
 //   - concurrency: the number of parts of one multipart upload in flight
 //     at once, from 1 to 32. Unset means 4.
 //
