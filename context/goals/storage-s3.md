@@ -1,6 +1,6 @@
 # goal · storage-s3
 
-- **State:** brief ready
+- **State:** building
 - **Task:** hardening
 - **Branch:** hardening
 
@@ -11,86 +11,92 @@
 
 ## Task brief · hardening
 
+Repositories: go-storage (root), sqlate, blobfs, go-web-service; branch `hardening` in each.
+
 ```
-## Task brief · storage-s3 · hardening
-Problem       s3 is in go-storage and accepted in CI, but it falls short of
-              azureblob's provider bar: no per-try deadline, a Get body that
-              dies with its first stalled try, an unstated read-ahead bound,
-              unprefixed multipart errors, and docs that still call the tier
-              a proposal. Until it meets the bar, the tier isn't validated and
-              s3 can't be released.
-Behaviors     1. try_timeout is a positive Go duration bounding each try of
-                 every s3 request, a Get body's reads within that try
-                 included; it is the stdlib HTTP client timeout, with no
-                 custom SDK middleware. Unset means no deadline; a malformed
-                 or non-positive value fails construction. A stalled try is
-                 retried; all tries spent is ErrUnavailable.
-              2. A Get body whose try fails mid-read resumes from its offset
-                 with a ranged GetObject conditioned (If-Match) on the first
-                 response's ETag, up to max_retries resumes per read, and
-                 yields bytes identical to the object. With max_retries 0 it
-                 does not resume.
-              3. An object replaced (412) or deleted before a resume fails the
-                 read with ErrNotFound.
-              4. A body that stalls on every try fails the read with
-                 ErrUnavailable once its resumes are spent.
-              5. concurrency (default 4, range 1–32; out of range or malformed
-                 fails construction) bounds a multipart Put's parts in flight.
-                 The docs state the per-Put memory and read-ahead:
-                 part_size × (concurrency + 2), 48 MiB at the defaults, and
-                 that a declared Size can raise the part size.
-              6. Every multipart failure Put returns (cancellation, a part,
-                 completion) begins "s3:" and keeps its classification;
-                 cancellation stays unclassified.
-              7. Against SeaweedFS, acceptance shows a read paused past a short
-                 try_timeout resuming to identical bytes, and an object
-                 replaced mid-read failing ErrNotFound.
-              8. Docs: README names s3 the second provider and states
-                 transfermanager's v0 exception beside its link to the
-                 standard; design.md calls the tier validated, covers s3's
-                 try_timeout and upload defaults, states that a resumed tail
-                 goes unvalidated by checksum, and recommends an
-                 AbortIncompleteMultipartUpload lifecycle rule for uploads a
-                 killed Put orphans; provider-assumptions gives evidence for
-                 the three S3 claims (conditional ranged GET proven) and the
-                 SeaweedFS-vs-AWS differences; context README and STANDARDS.md
-                 name s3 under timeouts; s3's package docs no longer claim it
-                 reads no environment variable.
-              9. s3/CHANGELOG.md and azureblob/CHANGELOG.md are dated for
-                 s3/v0.1.0 and azureblob/v0.5.0, with tag links; check passes.
-Test seams    s3's exported Client against a scripted loopback S3 service
-              (stall, range, If-Match, parts in flight); s3's acceptance suite
-              against SeaweedFS; mise run check as the gate
-Slices        1. per-try deadline (+ env-var doc fix); demo: a stalled
-                 scripted service gives ErrUnavailable within the budget
-              2. resuming Get body, unit and acceptance; demo: resume and
-                 replace tests pass, locally against SeaweedFS too
-              3. concurrency option and stated bound; demo: in-flight parts
-                 never exceed concurrency
-              4. "s3:" prefix on multipart failures; demo: failure tests
-              5. docs; demo: check green, docs read for coherence
-              6. release prep: date both changelogs; demo: check green
-Out of scope  a base go-storage release; removing Put's double-buffered first
-              part; transfermanager's stdlib log output; architecture-page and
-              catalog edits (sync's pending edits); local Azurite tasks
-Door          two-way through slice 6; one-way at SHIP: pushed tags are pinned
-              by the module proxy and checksum database and never re-cut
+## Task brief · storage-s3 · hardening (revised at BRIEF)
+Problem       s3 falls short of azureblob's provider bar (slices 1–6, built).
+              And the workspace has no convention for test and dev containers:
+              go-storage starts SeaweedFS with a shell script and Azurite with an
+              inline loop, azureblob has no local task, image pins live on
+              image: lines CI duplicates, and task names mix db-up with
+              seaweedfs:start.
+Behaviors     1–9. As approved (try_timeout; resuming Get; 412/deleted ->
+                 ErrNotFound; stalled -> ErrUnavailable; concurrency and stated
+                 bounds; "s3:" prefix; SeaweedFS acceptance of resumption; docs;
+                 changelogs dated for s3/v0.1.0 and azureblob/v0.5.0).
+              10. Every compose service in go-storage, sqlate, blobfs, and
+                 go-web-service builds from a Dockerfile at
+                 compose/<service>/Dockerfile under a root compose.yml; its FROM
+                 line is the service's one image pin; its configuration is
+                 COPY'd in; where the base image can run a probe, a HEALTHCHECK
+                 in the Dockerfile defines readiness (distroless images have
+                 none and are waited on as running).
+              11. Stacks start with `docker compose up -d --wait --build` and
+                 stop with `docker compose down`; a test-only harness
+                 (go-storage's) keeps data on tmpfs, so every start is empty;
+                 development stacks keep named volumes that <stack>:down keeps
+                 and <stack>:reset deletes.
+              12. Multi-part mise tasks are named <group>:<member> with a colon,
+                 group first, in all four repositories (db:up, db:down,
+                 db:reset, db:state, otel:*, stack:*, acceptance:s3,
+                 acceptance:azureblob); go-storage's seaweedfs:* retire; no doc,
+                 test comment, or workflow names an old task.
+              13. go-storage: `mise run acceptance` (every provider) and
+                 acceptance:s3 / acceptance:azureblob each bring their service
+                 up healthy, run that module's tests with its endpoint set, and
+                 tear down pass or fail; azureblob runs locally for the first
+                 time. No shell script backs the harness.
+              14. Each repository's CI job that needs containers runs the same
+                 mise task a developer runs, with container logs on failure.
+              15. Each repository's currency reports a Dockerfile FROM pin that
+                 trails, and ignores build-only compose services; currency exits
+                 0 in all four.
+              16. READMEs, package docs, compose READMEs, STANDARDS.md, and
+                 changelogs describe the tasks and the convention.
+Test seams    as approved; plus each repository's mise tasks against Docker
+              (acceptance, integration, db:up), mise run check and currency
+Slices        1–6. committed (go-storage)
+              7. upgrade sqlate: go 1.27.2; currency exits 0, check passes
+              8. upgrade blobfs: go 1.27.2, x/text v0.43.0, example on
+                 go-storage v0.5.0; currency exits 0, check passes
+              9. upgrade go-web-service: slab x/sys v0.49.0, x/term v0.47.0;
+                 currency exits 0, check passes
+              10. go-storage harness: SeaweedFS and Azurite Dockerfiles,
+                 compose.yml, acceptance tasks, currency FROM scan, script
+                 retired; demo: acceptance green for s3 and azureblob locally
+              11. go-storage CI and docs: the acceptance job runs mise run
+                 acceptance; README, both doc.go, STANDARDS.md; demo: the PR's
+                 acceptance job green
+              12. sqlate convention: postgres Dockerfile, db:* tasks, currency,
+                 CI, docs; demo: db:up healthy, live tests green
+              13. blobfs convention: postgres and Azurite Dockerfiles, tasks,
+                 currency, CI, docs; demo: acceptance green
+              14. go-web-service convention: postgres, Azurite, otel collector,
+                 loki, tempo, mimir, grafana Dockerfiles with configs COPY'd;
+                 db:/otel:/stack: tasks; integration task and CI job; currency;
+                 docs, slab docs, test comments; demo: integration green,
+                 stack:up healthy
+              15. release re-check: both changelogs and module docs current;
+                 check green in all four
+Out of scope  a base go-storage release; tags in sqlate, blobfs, go-web-service;
+              Put's buffering; transfermanager's log output; archived spikes'
+              task names; spike-model-hosting; architecture-page edits (sync)
+Door          two-way through slice 15 (images, tasks, CI revert with the
+              merges); one-way at SHIP for the tags
 Release       s3/v0.1.0, azureblob/v0.5.0
 ```
 
 ## Progress
 
-slices 6/6 committed (d3b165f, 8afbb0d, 13179c2, 4c12efe, 22fc733, 445b840) · standards ✓ (a911618, 82e23f5) · spec ✓ (no gaps) · editor ✓
+slices 6/15 committed (go-storage: d3b165f, 8afbb0d, 13179c2, 4c12efe, 22fc733, 445b840; reviews and editor on 1–6: a911618, 82e23f5, 31a5d12) · standards — · spec — · editor —
 
 ## Decisions
 
-- port: SeaweedFS is pinned once, on CI's `image:` line, and seaweedfs:start reads it, because currency doesn't scan scripts, so a pin in a script would fall behind without anyone noticing.
 - port: the spike's `acceptance` mise task comes along with seaweedfs:start/stop, because release-and-ci asks for a local acceptance task.
-- port: the harness is docker run, as for Azurite; no new harness library.
 - plan: port's brief was written at plan, so start re-runs currency and presents it for approval.
 - port: currency re-run at start (Go 1.27.2, go-storage v0.5.0, AWS SDK patch releases only); the brief covered it, so no round.
 - port: azureblob's changelog marks the go-storage v0.5.0 requirement Breaking, because it pulls go-core v0.6.0 into an importer's build.
-- port: `scripts/seaweedfs.sh` takes the image from `$image` or reads it from `ci.yml`'s one `image:` line, and CI's start step calls the script, so the readiness wait is written once.
 - port: s3's CI test step has no `if:` condition, so a failing azureblob step skips it, as a failing step skips the rest of the job.
 - port: s3's changelog links Unreleased to `commits/HEAD/s3` until s3 has a tag.
 - port: STANDARDS.md names s3 in the pointers whose principles s3 already meets; the timeouts pointer names s3 at hardening.
@@ -116,10 +122,18 @@ slices 6/6 committed (d3b165f, 8afbb0d, 13179c2, 4c12efe, 22fc733, 445b840) · s
 - hardening: the resumption's classifier is classifyResume, not azureblob's classifyRead, because it classifies only the resumption's GetObject; every other Get body failure goes through classify.
 - hardening: design.md's write path holds the AbortIncompleteMultipartUpload lifecycle-rule recommendation, since it extends the crash case there; the rule is set where the bucket is provisioned, as EnsureContainer never configures a bucket.
 - hardening: provider-assumptions marks the repeated abort's NoSuchUpload path untested, since no unit test answers an abort with it.
+- hardening (redirect at BRIEF): the architect asked for a standard container convention used by CI and mise alike, with no shell scripts; it is built in hardening, before the tags, because both providers' package docs describe the harness. It replaces port's three harness decisions (pin on CI's image: line, docker run, scripts/seaweedfs.sh).
+- hardening: each compose service builds from compose/<service>/Dockerfile under a root compose.yml; the FROM line is its one pin; Dockerfile, not Containerfile, because docker and compose find it with no setting.
+- hardening: readiness is the image's HEALTHCHECK where the base image can run a probe; distroless images get a Dockerfile with none and are waited on as running.
+- hardening: stacks start with `docker compose up -d --wait --build`; configuration is COPY'd into the image, not bind-mounted.
+- hardening: a test-only harness (go-storage's) keeps data on tmpfs; development stacks keep named volumes that <stack>:down keeps and <stack>:reset deletes.
+- hardening: CI runs the same mise task a developer runs; currency reads Dockerfile FROM lines and skips build-only compose services; Renovate-style updaters stay excluded.
+- hardening: go-storage's tasks are acceptance, acceptance:s3, acceptance:azureblob, up, down; seaweedfs:* retire; Azurite keeps --loose, under which azureblob's suite is proven.
+- hardening: multi-part mise task names are <group>:<member>, colon, group first, workspace-wide (mise's own namespace separator; globs a group).
+- hardening: the sweep runs in this task across sqlate, blobfs, and go-web-service, not as its own goal (architect); archived spikes keep their task names.
 
 ## Pending edits
 
-- coordinator · roadmap: consider a backlog goal for local Azurite start/stop/acceptance tasks in go-storage.
 - coordinator · roadmap: consider a backlog goal for s3 `Put`'s memory: transfermanager copies the first part out of `Put`'s decision buffer unpooled, and for an unknown size that buffer grows by doubling, so a multipart `Put` holds part_size × (concurrency + 3) or (concurrency + 4) while it starts, against the part_size × (concurrency + 2) it reads ahead (56 and 64 MiB against 48 MiB at the defaults).
 - coordinator · roadmap: consider a backlog goal for transfermanager's standard-library `log` output when a multipart upload's completion fails, which bypasses the application's logger.
 - coordinator · references.toml: under the archived spikes, add `[repos.spike-s3-storage]` with `remote = "https://github.com/JaimeStill/spike-s3-storage.git"` and `archived = true`.
