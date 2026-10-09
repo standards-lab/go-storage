@@ -41,4 +41,11 @@ changelog covers this sub-module only; the base module keeps its own.
   defaults. A declared `Size` that raises the part size raises them too.
 - Requires `github.com/standards-lab/go-storage` v0.5.0.
 
+### Fixed
+
+- Every failure a multipart `Put` returns begins "s3:", as its other failures do: a failed part,
+  a failed completion, and the caller's cancellation midway, whose message was transfermanager's
+  own "upload multipart failed, …". Each keeps its classification, and a cancellation still maps
+  to no sentinel.
+
 [Unreleased]: https://github.com/standards-lab/go-storage/commits/HEAD/s3

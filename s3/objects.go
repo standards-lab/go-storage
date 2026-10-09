@@ -116,8 +116,13 @@ func (c *Client) Put(ctx context.Context, key string, body io.Reader, opts stora
 // failedUpload returns the error Put reports for a failed multipart upload,
 // after it repeats the abort of the upload transfermanager started. The
 // body's own failure is returned unclassified, as it is before any request;
-// any other is classified. A repeat abort that fails is named in the error
-// but never classifies it, since the upload's failure is what Put reports.
+// any other is classified. Either begins "s3:": transfermanager's own
+// message, "upload multipart failed, upload id: …, cause: …", names no
+// provider, so a failed part, a failed completion, or the caller's
+// cancellation gains the prefix around its classified error, which keeps
+// the classification and leaves a cancellation unclassified. A repeat abort
+// that fails is named in the error but never classifies it, since the
+// upload's failure is what Put reports.
 func (c *Client) failedUpload(ctx context.Context, key string, src *bodyReader, err error) error {
 	var abortErr error
 	if mpErr, ok := errors.AsType[transfermanager.MultipartUploadError](err); ok && mpErr.UploadID() != "" {
@@ -126,7 +131,7 @@ func (c *Client) failedUpload(ctx context.Context, key string, src *bodyReader, 
 	if src.err != nil {
 		err = fmt.Errorf("s3: read body: %w", src.err)
 	} else {
-		err = classify(err)
+		err = fmt.Errorf("s3: %w", classify(err))
 	}
 	if abortErr != nil {
 		return fmt.Errorf("%w (abort of multipart upload failed, parts may remain: %v)", err, abortErr)

@@ -581,6 +581,54 @@ func TestPut_CancelledMultipartStillAborts(t *testing.T) {
 	wantAborts(t, svc.Requests(), 2, false)
 }
 
+// Every failure of a multipart upload past its body, the caller's
+// cancellation, a failed part, or a failed completion, names the provider
+// as Put's other failures do, with a message that begins "s3:", and keeps
+// its classification: a cancellation maps to no sentinel, and a part or
+// completion failure to the one its status maps to.
+func TestPut_MultipartFailuresArePrefixed(t *testing.T) {
+	sentinels := []error{storage.ErrNotFound, storage.ErrContainerNotFound, storage.ErrTooLarge,
+		storage.ErrNotReady, storage.ErrUnavailable}
+	cases := []struct {
+		name   string
+		m      multipart
+		cancel bool
+		want   error // the error the failure wraps besides the SDK's
+	}{
+		{"caller cancels", multipart{}, true, context.Canceled},
+		{"part fails", multipart{part: failWith(http.StatusServiceUnavailable, "ServiceUnavailable")}, false,
+			storage.ErrUnavailable},
+		{"completion fails", multipart{complete: failWith(http.StatusInternalServerError, "InternalError")}, false,
+			storage.ErrUnavailable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.m.etag = `"never"`
+			svc := newService(t, tc.m.handler())
+			c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"part_size": strconv.Itoa(testPartSize)}))
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var body io.Reader = bytes.NewReader(make([]byte, 12<<20))
+			if tc.cancel {
+				body = &cancelAfter{r: body, n: 7 << 20, cancel: cancel}
+			}
+			_, err := c.Put(ctx, "k", body, storage.PutOptions{})
+			if err == nil || !strings.HasPrefix(err.Error(), "s3: ") || strings.HasPrefix(err.Error(), "s3: s3:") {
+				t.Fatalf("Put = %v, want a failure that begins with one \"s3: \"", err)
+			}
+			if !errors.Is(err, tc.want) {
+				t.Errorf("Put = %v, want it to wrap %v", err, tc.want)
+			}
+			for _, s := range sentinels {
+				if s != tc.want && errors.Is(err, s) {
+					t.Errorf("Put = %v, want it not classified %v", err, s)
+				}
+			}
+		})
+	}
+}
+
 // transfermanager drops the error of an abort that fails after a part
 // failed, so Put's own abort is what frees the upload. When that one fails
 // too, Put names it in the error, which keeps the part failure's
