@@ -6,15 +6,18 @@
 //
 // # The Fake
 //
-// [NewFake] returns a Fake whose container exists and that holds no objects.
-// A storage.Store wraps a Fake the way it wraps a provider. Each [Option]
-// changes one default at construction:
+// [NewFake] returns an empty Fake configured by an [Options] value. The zero
+// Options gives a Fake whose container exists, and each field changes one
+// default at construction:
 //
-//   - [WithCapabilities] replaces the default key rules, whose length cap
-//     is [DefaultMaxKeyLength].
-//   - [WithClock] sets the clock that stamps ModifiedAt, in UTC.
-//   - [WithPageSize] sets the page size of a List without a Limit.
-//   - [WithoutContainer] starts the Fake with no container.
+//   - [Options.Capabilities] replaces the default key rules whole when its
+//     MaxKeyLength or ValidateKey is set. The default caps a key's length at
+//     [DefaultMaxKeyLength] runes and rejects an empty key.
+//   - [Options.Clock] sets the clock that stamps ModifiedAt, in UTC.
+//   - [Options.PageSize] sets the page size of a List without a Limit.
+//   - [Options.NoContainer] starts the Fake with no container.
+//
+// A storage.Store wraps a Fake the way it wraps a provider.
 //
 // Beyond the storage.Client methods, a Fake has methods that cause faults
 // and report what it received:

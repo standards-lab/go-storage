@@ -7,6 +7,66 @@ only; each provider sub-module keeps its own.
 
 ## [Unreleased]
 
+## [v0.8.0] - 2026-11-11
+
+`storagetest.NewFake` takes its configuration as one `storagetest.Options` value, not variadic
+option functions. The zero value keeps the defaults. The `go-core` requirement moves to v0.12.0,
+which makes the same change to its own constructors.
+
+### Added
+
+- `storagetest.Options`, which configures a `Fake`. `Clock` is the time it stamps on a `Put`, in
+  UTC, `PageSize` is the page size of a `List` without a `Limit`, `Capabilities` replaces the
+  default key rules, and `NoContainer` starts the Fake with no container. A nil `Clock` keeps
+  `time.Now` and a `PageSize` of 0 or less keeps 3. A `Capabilities` whose `MaxKeyLength` or
+  `ValidateKey` is set replaces the default whole, so a `MaxKeyLength` with a nil `ValidateKey`
+  accepts every key; one with neither set keeps the default.
+
+### Changed
+
+- **Breaking:** `storagetest.NewFake` takes a `storagetest.Options` in place of variadic
+  `storagetest.Option` values. A call with no option passes `storagetest.Options{}`.
+- **Breaking:** The `go-core` requirement is v0.12.0, which pulls its options break into an
+  importer's build: `reactor.New` takes a trailing `reactor.Options` and `event.NewRecorder` an
+  `event.Options` in place of variadic option values, `reactor.CancelWithin` returns a
+  `time.Duration` for `reactor.Options.CancelAfter`, and `reactor.Option`, `reactor.CancelAfter`,
+  `event.Option`, `event.Clock`, and `event.IDs` are removed. go-core's changelog has the
+  migration from v0.11.0. The storage library calls none of them.
+
+### Removed
+
+- **Breaking:** `storagetest.Option` and the `WithClock`, `WithPageSize`, `WithCapabilities`, and
+  `WithoutContainer` option functions, with no aliases. Set `Options.Clock`, `Options.PageSize`,
+  `Options.Capabilities`, and `Options.NoContainer`.
+
+### Migrating from v0.7.0
+
+- **A Fake's options become one `storagetest.Options` value.** Leave a field unset for its
+  default.
+
+  ```go
+  // v0.7.0
+  fake := storagetest.NewFake()
+  fake := storagetest.NewFake(storagetest.WithClock(clock))
+  fake := storagetest.NewFake(storagetest.WithPageSize(2))
+  fake := storagetest.NewFake(storagetest.WithCapabilities(caps))
+  fake := storagetest.NewFake(storagetest.WithoutContainer())
+
+  // v0.8.0
+  fake := storagetest.NewFake(storagetest.Options{})
+  fake := storagetest.NewFake(storagetest.Options{Clock: clock})
+  fake := storagetest.NewFake(storagetest.Options{PageSize: 2})
+  fake := storagetest.NewFake(storagetest.Options{Capabilities: caps})
+  fake := storagetest.NewFake(storagetest.Options{NoContainer: true})
+  ```
+
+- **A zero `Capabilities` keeps the default key rules.** `WithCapabilities` with a zero
+  `storage.Capabilities` cleared them, so a test that relied on that sets a `ValidateKey` that
+  accepts every key instead.
+
+- **go-core's own constructors change too.** go-core's changelog migrates `reactor.New`,
+  `reactor.CancelWithin`, and `event.NewRecorder` from v0.11.0.
+
 ## [v0.7.0] - 2026-11-11
 
 ### Changed
@@ -184,7 +244,8 @@ only; each provider sub-module keeps its own.
   entity-tag form and equal across `Put`, `Get`, `Stat`, and `List`. `Fake` enforces `Size`
   and reports a quoted ETag.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.8.0...HEAD
+[v0.8.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.8.0
 [v0.7.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.7.0
 [v0.6.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.6.0
 [v0.5.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.5.0

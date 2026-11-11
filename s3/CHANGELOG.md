@@ -7,6 +7,16 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-11-11
+
+### Changed
+
+- **Breaking:** The `go-storage` requirement is v0.8.0, which requires `go-core` v0.12.0 and
+  pulls both options breaks into an importer's build: `storagetest.NewFake` takes a
+  `storagetest.Options` in place of variadic option functions, which are removed, and go-core's
+  `reactor.New` and `event.NewRecorder` take a trailing Options struct in the same way. The base
+  module's v0.8.0 entry migrates the first and points to go-core's changelog for the second.
+
 ## [v0.2.0] - 2026-11-11
 
 ### Changed
@@ -65,6 +75,7 @@ changelog covers this sub-module only; the base module keeps its own.
   `Date` when the `HeadObject` fails or finds another version.
 - Requires `github.com/standards-lab/go-storage` v0.6.0.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/s3/v0.2.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/s3/v0.3.0...HEAD
+[v0.3.0]: https://github.com/standards-lab/go-storage/releases/tag/s3/v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-storage/releases/tag/s3/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-storage/releases/tag/s3/v0.1.0
