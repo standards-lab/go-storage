@@ -10,9 +10,8 @@
 // Options gives a Fake whose container exists, and each field changes one
 // default at construction:
 //
-//   - [Options.Capabilities] replaces the default key rules whole when its
-//     MaxKeyLength or ValidateKey is set. The default caps a key's length at
-//     [DefaultMaxKeyLength] runes and rejects an empty key.
+//   - [Options.Capabilities] replaces the default key rules, whose length cap
+//     is [DefaultMaxKeyLength].
 //   - [Options.Clock] sets the clock that stamps ModifiedAt, in UTC.
 //   - [Options.PageSize] sets the page size of a List without a Limit.
 //   - [Options.NoContainer] starts the Fake with no container.

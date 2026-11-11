@@ -25,8 +25,8 @@ var _ storage.Client = (*Fake)(nil)
 const DefaultMaxKeyLength = 1024
 
 // defaultPageSize is the page size List uses when Limit is 0 and
-// Options.PageSize does not replace it. It is small so a test that lists more than
-// a handful of objects pages.
+// Options.PageSize does not replace it. It is small so a test that lists
+// more than a handful of objects pages.
 const defaultPageSize = 3
 
 // defaultContentType is the ContentType a Put without one stores.
@@ -52,7 +52,7 @@ var (
 //
 // While [Fake.SetDown] has it down, every method fails with an error matching
 // storage.ErrUnavailable that wraps ErrDown. While its container does not
-// exist ([Options].NoContainer, [Fake.DropContainer]), Probe and every object
+// exist ([Options.NoContainer], [Fake.DropContainer]), Probe and every object
 // operation fail with an error matching storage.ErrContainerNotFound that
 // wraps ErrNoSuchContainer, and EnsureContainer creates it.
 //
@@ -126,8 +126,7 @@ type Options struct {
 	NoContainer bool
 }
 
-// NewFake returns an empty Fake configured by opts. The zero Options gives
-// a Fake whose container exists, with the defaults each field describes.
+// NewFake returns an empty Fake configured by opts.
 func NewFake(opts Options) *Fake {
 	f := &Fake{
 		now:      time.Now,
