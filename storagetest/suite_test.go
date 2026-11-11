@@ -18,13 +18,13 @@ import (
 
 func TestRun_Fake(t *testing.T) {
 	storagetest.Run(t, func(*testing.T) storage.Client {
-		return storagetest.NewFake()
+		return storagetest.NewFake(storagetest.Options{})
 	})
 }
 
-func TestRun_FakeWithoutContainer(t *testing.T) {
+func TestRun_FakeNoContainer(t *testing.T) {
 	storagetest.Run(t, func(*testing.T) storage.Client {
-		return storagetest.NewFake(storagetest.WithoutContainer())
+		return storagetest.NewFake(storagetest.Options{NoContainer: true})
 	})
 }
 
@@ -34,7 +34,7 @@ func TestRun_Store(t *testing.T) {
 		if err := cfg.Finalize(""); err != nil {
 			t.Fatalf("finalize config: %v", err)
 		}
-		s := storage.New(storagetest.NewFake(storagetest.WithoutContainer()), cfg)
+		s := storage.New(storagetest.NewFake(storagetest.Options{NoContainer: true}), cfg)
 		if err := s.Start(t.Context()); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
@@ -44,7 +44,7 @@ func TestRun_Store(t *testing.T) {
 
 func TestRunMissingContainer_Fake(t *testing.T) {
 	storagetest.RunMissingContainer(t, func(*testing.T) storage.Client {
-		return storagetest.NewFake(storagetest.WithoutContainer())
+		return storagetest.NewFake(storagetest.Options{NoContainer: true})
 	})
 }
 
@@ -56,7 +56,7 @@ func TestRunMissingContainer_Store(t *testing.T) {
 		if err := cfg.Finalize(""); err != nil {
 			t.Fatalf("finalize config: %v", err)
 		}
-		f := storagetest.NewFake()
+		f := storagetest.NewFake(storagetest.Options{})
 		s := storage.New(f, cfg)
 		if err := s.Start(t.Context()); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -314,35 +314,35 @@ var brokenClients = []struct {
 	client  func() storage.Client
 	failing string
 }{
-	{"Delete reports a missing key", func() storage.Client { return &notFoundOnDelete{storagetest.NewFake()} }, "Delete"},
-	{"Put keeps the old ContentType on replace", func() storage.Client { return &keepsContentType{storagetest.NewFake()} }, "Replace"},
-	{"Put requires a seekable body", func() storage.Client { return &seekOnly{storagetest.NewFake()} }, "PutNonSeekableBody"},
-	{"Put requires a seekable body under one-byte reads", func() storage.Client { return &seekOnly{storagetest.NewFake()} }, "PutOneByteReads"},
-	{"Put truncates a large body", func() storage.Client { return &truncatingPut{storagetest.NewFake()} }, "LargeBody"},
-	{"Put reports no ETag", func() storage.Client { return &emptyETag{storagetest.NewFake()} }, "RoundTrip"},
-	{"List never continues past its first page", func() storage.Client { return &onePageList{storagetest.NewFake()} }, "List"},
-	{"List ignores the prefix", func() storage.Client { return &ignoresPrefix{storagetest.NewFake()} }, "List"},
+	{"Delete reports a missing key", func() storage.Client { return &notFoundOnDelete{storagetest.NewFake(storagetest.Options{})} }, "Delete"},
+	{"Put keeps the old ContentType on replace", func() storage.Client { return &keepsContentType{storagetest.NewFake(storagetest.Options{})} }, "Replace"},
+	{"Put requires a seekable body", func() storage.Client { return &seekOnly{storagetest.NewFake(storagetest.Options{})} }, "PutNonSeekableBody"},
+	{"Put requires a seekable body under one-byte reads", func() storage.Client { return &seekOnly{storagetest.NewFake(storagetest.Options{})} }, "PutOneByteReads"},
+	{"Put truncates a large body", func() storage.Client { return &truncatingPut{storagetest.NewFake(storagetest.Options{})} }, "LargeBody"},
+	{"Put reports no ETag", func() storage.Client { return &emptyETag{storagetest.NewFake(storagetest.Options{})} }, "RoundTrip"},
+	{"List never continues past its first page", func() storage.Client { return &onePageList{storagetest.NewFake(storagetest.Options{})} }, "List"},
+	{"List ignores the prefix", func() storage.Client { return &ignoresPrefix{storagetest.NewFake(storagetest.Options{})} }, "List"},
 	{"EnsureContainer fails over an existing container", func() storage.Client {
-		return &ensureOnce{storagetest.NewFake(storagetest.WithoutContainer())}
+		return &ensureOnce{storagetest.NewFake(storagetest.Options{NoContainer: true})}
 	}, "EnsureContainer"},
-	{"ValidateKey accepts every key", func() storage.Client { return &permissiveKeys{storagetest.NewFake()} }, "Capabilities"},
-	{"List reports an unquoted ETag", func() storage.Client { return &unquotedListETag{storagetest.NewFake()} }, "List"},
-	{"Stat reports an ETag other than Put's", func() storage.Client { return &statETagDiffers{storagetest.NewFake()} }, "RoundTrip"},
-	{"Put commits the bytes read before the body failed", func() storage.Client { return &commitsPartialBody{storagetest.NewFake()} }, "PutBodyFailsMidway"},
+	{"ValidateKey accepts every key", func() storage.Client { return &permissiveKeys{storagetest.NewFake(storagetest.Options{})} }, "Capabilities"},
+	{"List reports an unquoted ETag", func() storage.Client { return &unquotedListETag{storagetest.NewFake(storagetest.Options{})} }, "List"},
+	{"Stat reports an ETag other than Put's", func() storage.Client { return &statETagDiffers{storagetest.NewFake(storagetest.Options{})} }, "RoundTrip"},
+	{"Put commits the bytes read before the body failed", func() storage.Client { return &commitsPartialBody{storagetest.NewFake(storagetest.Options{})} }, "PutBodyFailsMidway"},
 	{"Put overwrites the existing object before failing", func() storage.Client {
-		return &overwritesBeforeFailing{storagetest.NewFake()}
+		return &overwritesBeforeFailing{storagetest.NewFake(storagetest.Options{})}
 	}, "PutBodyFailsMidway"},
-	{"Put stores the body ignoring Size", func() storage.Client { return &ignoresSize{storagetest.NewFake()} }, "PutSizeMismatch"},
-	{"Put truncates the body to Size", func() storage.Client { return &truncatesToSize{storagetest.NewFake()} }, "PutSizeMismatch"},
+	{"Put stores the body ignoring Size", func() storage.Client { return &ignoresSize{storagetest.NewFake(storagetest.Options{})} }, "PutSizeMismatch"},
+	{"Put truncates the body to Size", func() storage.Client { return &truncatesToSize{storagetest.NewFake(storagetest.Options{})} }, "PutSizeMismatch"},
 	{"a missing key also matches ErrContainerNotFound", func() storage.Client {
-		return &alsoClassifies{storagetest.NewFake(), storage.ErrContainerNotFound}
+		return &alsoClassifies{storagetest.NewFake(storagetest.Options{}), storage.ErrContainerNotFound}
 	}, "MissingKey"},
 	{"a missing key also matches ErrUnavailable", func() storage.Client {
-		return &alsoClassifies{storagetest.NewFake(), storage.ErrUnavailable}
+		return &alsoClassifies{storagetest.NewFake(storagetest.Options{}), storage.ErrUnavailable}
 	}, "MissingKey"},
-	{"Put reports no ContentType when none was given", func() storage.Client { return &noDefaultContentType{storagetest.NewFake()} }, "PutUnknownSize"},
-	{"Put, Get, and Stat report ModifiedAt outside UTC", func() storage.Client { return &nonUTCModifiedAt{storagetest.NewFake()} }, "RoundTrip"},
-	{"List reports ModifiedAt outside UTC", func() storage.Client { return &nonUTCListModifiedAt{storagetest.NewFake()} }, "List"},
+	{"Put reports no ContentType when none was given", func() storage.Client { return &noDefaultContentType{storagetest.NewFake(storagetest.Options{})} }, "PutUnknownSize"},
+	{"Put, Get, and Stat report ModifiedAt outside UTC", func() storage.Client { return &nonUTCModifiedAt{storagetest.NewFake(storagetest.Options{})} }, "RoundTrip"},
+	{"List reports ModifiedAt outside UTC", func() storage.Client { return &nonUTCListModifiedAt{storagetest.NewFake(storagetest.Options{})} }, "List"},
 }
 
 // Run fails the case that proves the contract a broken client breaks. As
@@ -408,10 +408,10 @@ func TestRunMissingContainer_CatchesBrokenClients(t *testing.T) {
 		op     string
 	}{
 		{"a Probe that reports ErrNotFound", func() storage.Client {
-			return notFoundContainer{storagetest.NewFake(storagetest.WithoutContainer())}
+			return notFoundContainer{storagetest.NewFake(storagetest.Options{NoContainer: true})}
 		}, "Probe"},
 		{"a Delete that swallows the missing container", func() storage.Client {
-			return swallowsContainer{storagetest.NewFake(storagetest.WithoutContainer())}
+			return swallowsContainer{storagetest.NewFake(storagetest.Options{NoContainer: true})}
 		}, "Delete"},
 	}
 	if name := os.Getenv(childEnv); name != "" {
@@ -447,7 +447,7 @@ func TestRunMissingContainer_CatchesBrokenClients(t *testing.T) {
 func TestRunMissingContainer_CleansUpAStrayPut(t *testing.T) {
 	const client = "createsContainer"
 	if os.Getenv(childEnv) == client {
-		f := storagetest.NewFake(storagetest.WithoutContainer())
+		f := storagetest.NewFake(storagetest.Options{NoContainer: true})
 		t.Run("check", func(t *testing.T) {
 			storagetest.RunMissingContainer(t, func(*testing.T) storage.Client { return createsContainer{f} })
 		})
