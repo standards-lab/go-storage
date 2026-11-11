@@ -7,6 +7,23 @@ only; each provider sub-module keeps its own.
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-11-11
+
+### Changed
+
+- **Breaking:** The `go-core` requirement is v0.11.0, which pulls go-core's graph and lifecycle
+  changes since v0.7.0 into an importer's build. `graph.Scope.After` is removed: a node's
+  order-only edges are declared at `Define` with `graph.After`. `graph.Graph.Observe` takes a
+  `func(graph.Ref)` in place of a `func(string)`. `Define`, `Value`, `Fresh`, and `Group` panic
+  on a name that contains a comma or a newline. `graph.Dependency` gains a `Ref` field, so a
+  `Dependency` composite literal without field names no longer compiles. A `Monitored` value's
+  runtime failure ends the run as `run: <node>: <error>`, labelled with its node's name.
+  `lifecycle.Coordinator.Checks` lists a check only for a value that implements both `Starter`
+  and `ReadinessChecker`. An importer that relies on any of these breaks; go-core's changelog
+  migrates each.
+- `*Store` is a `lifecycle.ReadyStarter`, so the Coordinator still lists its `Ready` check under
+  its node's name.
+
 ## [v0.6.0] - 2026-10-09
 
 ### Changed
@@ -167,7 +184,8 @@ only; each provider sub-module keeps its own.
   entity-tag form and equal across `Put`, `Get`, `Stat`, and `List`. `Fake` enforces `Size`
   and reports a quoted ETag.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/v0.7.0...HEAD
+[v0.7.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.7.0
 [v0.6.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.6.0
 [v0.5.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.5.0
 [v0.4.0]: https://github.com/standards-lab/go-storage/releases/tag/v0.4.0

@@ -8,6 +8,19 @@ sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-11-11
+
+### Changed
+
+- **Breaking:** The `go-storage` requirement is v0.7.0, which requires `go-core` v0.11.0. An
+  importer breaks that relies on what go-core changes from v0.7.0 to v0.11.0, since the
+  requirement pulls v0.11.0 into its build: `graph.Scope.After` is removed in favor of `graph.After` at `Define`, `Observe`
+  takes a `func(graph.Ref)`, a node name may not contain a comma or a newline,
+  `graph.Dependency` gains a `Ref` field, a `Monitored` failure reads `run: <node>: <error>`,
+  and `Coordinator.Checks` lists only a `ReadyStarter`. The base module's v0.7.0 entry details
+  each.
+- `azcore` is v1.24.0 and `azblob` v1.8.3.
+
 ## [v0.5.0] - 2026-10-09
 
 ### Changed
@@ -121,7 +134,8 @@ sub-module only; the base module keeps its own.
   against a real service, gated on `AZUREBLOB_TEST_ENDPOINT` so they skip on the unit tier.
 - Requires `github.com/standards-lab/go-storage` v0.1.0.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/azureblob/v0.5.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/azureblob/v0.6.0...HEAD
+[v0.6.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.6.0
 [v0.5.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.5.0
 [v0.4.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.3.0

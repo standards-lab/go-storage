@@ -139,7 +139,7 @@
 //
 // The module pins aws-sdk-go-v2's service/s3, its credentials and smithy-go,
 // and feature/s3/transfermanager for multipart upload. transfermanager is
-// v0 (v0.4.15), held as a stated exception the way go-observability holds
+// v0 (v0.5.7), held as a stated exception the way go-observability holds
 // otelhttp: AWS has not released it past v0, it is the maintained successor
 // to the deprecated feature/s3/manager, it is maintained by the project
 // that defines the ecosystem, and it adds no dependency beyond the SDK
