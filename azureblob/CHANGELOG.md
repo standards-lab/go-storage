@@ -8,6 +8,16 @@ sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-11-11
+
+### Changed
+
+- **Breaking:** The `go-storage` requirement is v0.8.0, which requires `go-core` v0.12.0 and
+  pulls both options breaks into an importer's build: `storagetest.NewFake` takes a
+  `storagetest.Options` in place of variadic option functions, which are removed, and go-core's
+  `reactor.New` and `event.NewRecorder` take a trailing Options struct in the same way. The base
+  module's v0.8.0 entry migrates the first and points to go-core's changelog for the second.
+
 ## [v0.6.0] - 2026-11-11
 
 ### Changed
@@ -134,7 +144,8 @@ sub-module only; the base module keeps its own.
   against a real service, gated on `AZUREBLOB_TEST_ENDPOINT` so they skip on the unit tier.
 - Requires `github.com/standards-lab/go-storage` v0.1.0.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/azureblob/v0.6.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/azureblob/v0.7.0...HEAD
+[v0.7.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.7.0
 [v0.6.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.6.0
 [v0.5.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.5.0
 [v0.4.0]: https://github.com/standards-lab/go-storage/releases/tag/azureblob/v0.4.0

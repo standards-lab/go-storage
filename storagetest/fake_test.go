@@ -73,7 +73,7 @@ func (r errReader) Read([]byte) (int, error) { return 0, r.err }
 func TestFake_PutGetRoundTrip(t *testing.T) {
 	// A clock in another zone shows the Fake stamps its reading in UTC.
 	stamp := time.Date(2026, 9, 18, 14, 0, 0, 0, time.FixedZone("CEST", 2*60*60))
-	f := storagetest.NewFake(storagetest.WithClock(func() time.Time { return stamp }))
+	f := storagetest.NewFake(storagetest.Options{Clock: func() time.Time { return stamp }})
 	ctx := context.Background()
 
 	obj, err := f.Put(ctx, "a/hello.txt", strings.NewReader("hello"), storage.PutOptions{ContentType: "text/plain"})
@@ -117,7 +117,7 @@ func TestFake_PutGetRoundTrip(t *testing.T) {
 }
 
 func TestFake_ETagFollowsContent(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 
 	same1 := putString(t, f, "one", "content")
 	same2 := putString(t, f, "two", "content")
@@ -132,7 +132,7 @@ func TestFake_ETagFollowsContent(t *testing.T) {
 }
 
 func TestFake_PutReplaces(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 
 	first := putString(t, f, "k", "first")
 	second := putString(t, f, "k", "second value")
@@ -156,7 +156,7 @@ func TestFake_PutReplaces(t *testing.T) {
 }
 
 func TestFake_MissingKey(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	ctx := context.Background()
 
 	tests := []struct {
@@ -186,7 +186,7 @@ func TestFake_MissingKey(t *testing.T) {
 }
 
 func TestFake_DeleteIdempotent(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	ctx := context.Background()
 
 	if err := f.Delete(ctx, "never-stored"); err != nil {
@@ -206,7 +206,7 @@ func TestFake_DeleteIdempotent(t *testing.T) {
 }
 
 func TestFake_ListPrefix(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	for _, key := range []string{"b/2", "a/1", "b/1", "c/1", "a/2"} {
 		putString(t, f, key, key)
 	}
@@ -231,7 +231,7 @@ func TestFake_ListPrefix(t *testing.T) {
 }
 
 func TestFake_ListPagesToTheEnd(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	want := []string{"k1", "k2", "k3", "k4", "k5"}
 	for _, key := range want {
 		putString(t, f, key, key)
@@ -254,7 +254,7 @@ func TestFake_ListPagesToTheEnd(t *testing.T) {
 }
 
 func TestFake_ListDefaultPageSize(t *testing.T) {
-	f := storagetest.NewFake(storagetest.WithPageSize(2))
+	f := storagetest.NewFake(storagetest.Options{PageSize: 2})
 	for _, key := range []string{"k1", "k2", "k3"} {
 		putString(t, f, key, key)
 	}
@@ -282,10 +282,10 @@ func TestFake_ListDefaultPageSize(t *testing.T) {
 	}
 }
 
-func TestFake_WithPageSizeIgnoresNonPositive(t *testing.T) {
+func TestFake_PageSizeIgnoresNonPositive(t *testing.T) {
 	for _, n := range []int{0, -1} {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
-			f := storagetest.NewFake(storagetest.WithPageSize(n))
+			f := storagetest.NewFake(storagetest.Options{PageSize: n})
 			for _, key := range []string{"k1", "k2", "k3", "k4"} {
 				putString(t, f, key, key)
 			}
@@ -301,7 +301,7 @@ func TestFake_WithPageSizeIgnoresNonPositive(t *testing.T) {
 }
 
 func TestFake_PutDefaultsContentType(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 
 	obj := putString(t, f, "k", "v")
 	if obj.ContentType != "application/octet-stream" {
@@ -325,7 +325,7 @@ func TestFake_PutRecordsBeforeFailing(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f := storagetest.NewFake()
+			f := storagetest.NewFake(storagetest.Options{})
 			tc.setup(f)
 			opts := storage.PutOptions{ContentType: "text/plain", Size: 3}
 
@@ -340,7 +340,7 @@ func TestFake_PutRecordsBeforeFailing(t *testing.T) {
 }
 
 func TestFake_OutageToggle(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	ctx := context.Background()
 	putString(t, f, "k", "v")
 
@@ -389,7 +389,7 @@ func TestFake_OutageToggle(t *testing.T) {
 }
 
 func TestFake_PutBodyReadFails(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	cause := errors.New("stream broke")
 
 	_, err := f.Put(context.Background(), "k", errReader{err: cause}, storage.PutOptions{})
@@ -402,7 +402,7 @@ func TestFake_PutBodyReadFails(t *testing.T) {
 }
 
 func TestFake_PutRecordsCall(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 
 	if got := f.Puts(); got != 0 {
 		t.Fatalf("puts before any Put = %d, want 0", got)
@@ -426,7 +426,7 @@ func TestFake_PutRecordsCall(t *testing.T) {
 }
 
 func TestFake_PutInjectedFailure(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	cause := errors.New("provider rejected the write")
 	f.FailPut(cause)
 
@@ -448,7 +448,7 @@ func TestFake_PutInjectedFailure(t *testing.T) {
 }
 
 func TestFake_ProbeRecordsDeadline(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 
 	if err := f.Probe(context.Background()); err != nil {
 		t.Fatalf("Probe: %v", err)
@@ -479,7 +479,7 @@ func TestFake_ProbeRecordsDeadline(t *testing.T) {
 }
 
 func TestFake_EnsureContainerCreatesOnce(t *testing.T) {
-	f := storagetest.NewFake(storagetest.WithoutContainer())
+	f := storagetest.NewFake(storagetest.Options{NoContainer: true})
 	ctx := context.Background()
 
 	ops := []struct {
@@ -558,7 +558,7 @@ func TestFake_EnsureContainerCreatesOnce(t *testing.T) {
 }
 
 func TestFake_Capabilities(t *testing.T) {
-	got := storagetest.NewFake().Capabilities()
+	got := storagetest.NewFake(storagetest.Options{}).Capabilities()
 	if got.MaxKeyLength != storagetest.DefaultMaxKeyLength {
 		t.Errorf("MaxKeyLength of a plain fake = %d, want DefaultMaxKeyLength %d", got.MaxKeyLength, storagetest.DefaultMaxKeyLength)
 	}
@@ -579,10 +579,10 @@ func TestFake_Capabilities(t *testing.T) {
 		t.Error("ValidateKey of a key past the limit = nil, want an error")
 	}
 
-	f := storagetest.NewFake(storagetest.WithCapabilities(storage.Capabilities{
+	f := storagetest.NewFake(storagetest.Options{Capabilities: storage.Capabilities{
 		MaxKeyLength: 42,
 		ValidateKey:  func(string) error { return errors.New("no keys accepted") },
-	}))
+	}})
 	got = f.Capabilities()
 	if got.MaxKeyLength != 42 {
 		t.Errorf("MaxKeyLength = %d, want 42", got.MaxKeyLength)
@@ -592,8 +592,53 @@ func TestFake_Capabilities(t *testing.T) {
 	}
 }
 
+// Options.Capabilities replaces the default key rules whole once either
+// field is set: the Fake never fills in the other field from its default.
+func TestFake_CapabilitiesReplaceDefaultWhole(t *testing.T) {
+	got := storagetest.NewFake(storagetest.Options{Capabilities: storage.Capabilities{MaxKeyLength: 17}}).Capabilities()
+	if got.MaxKeyLength != 17 {
+		t.Errorf("MaxKeyLength = %d, want 17", got.MaxKeyLength)
+	}
+	if got.ValidateKey != nil {
+		t.Error("ValidateKey = the default, want nil: a set MaxKeyLength replaces the key rules whole")
+	}
+
+	rejected := errors.New("rejected")
+	got = storagetest.NewFake(storagetest.Options{Capabilities: storage.Capabilities{
+		ValidateKey: func(string) error { return rejected },
+	}}).Capabilities()
+	if got.MaxKeyLength != 0 {
+		t.Errorf("MaxKeyLength = %d, want 0: a set ValidateKey replaces the key rules whole", got.MaxKeyLength)
+	}
+	if got.ValidateKey == nil || !errors.Is(got.ValidateKey("k"), rejected) {
+		t.Error("ValidateKey did not pass through the configured function")
+	}
+}
+
+// The zero Options stamps Puts with the wall clock in UTC and starts with the
+// container present.
+func TestFake_ZeroOptions(t *testing.T) {
+	f := storagetest.NewFake(storagetest.Options{})
+	if !f.HasContainer() {
+		t.Error("HasContainer() = false for the zero Options, want true")
+	}
+
+	before := time.Now()
+	obj, err := f.Put(context.Background(), "k", strings.NewReader("v"), storage.PutOptions{})
+	after := time.Now()
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if obj.ModifiedAt.Location() != time.UTC {
+		t.Errorf("ModifiedAt location = %v, want UTC", obj.ModifiedAt.Location())
+	}
+	if obj.ModifiedAt.Before(before) || obj.ModifiedAt.After(after) {
+		t.Errorf("ModifiedAt = %v, want the wall clock between %v and %v", obj.ModifiedAt, before, after)
+	}
+}
+
 func TestFake_DropContainer(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	ctx := context.Background()
 	putString(t, f, "k", "v")
 	if !f.HasContainer() {
@@ -624,7 +669,7 @@ func TestFake_DropContainer(t *testing.T) {
 }
 
 func TestFake_ConcurrentPutGet(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	ctx := context.Background()
 	const workers = 8
 	const rounds = 50

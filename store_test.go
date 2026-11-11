@@ -34,7 +34,7 @@ var (
 // under the node's name, holding the Store itself, as doc.go promises a
 // composition root.
 func TestStore_CoordinatorChecksItUnderItsNodeName(t *testing.T) {
-	s := storage.New(storagetest.NewFake(), finalizedConfig(t, 0, 0))
+	s := storage.New(storagetest.NewFake(storagetest.Options{}), finalizedConfig(t, 0, 0))
 	g := graph.New()
 	node := g.Value("storage", s)
 	sys, err := g.Build(node)
@@ -169,12 +169,12 @@ func TestNew_PanicsOnNilClient(t *testing.T) {
 
 func TestNew_PanicsOnUnfinalizedConfig(t *testing.T) {
 	wantPanic(t, "storage: Config not finalized: call Finalize before New", func() {
-		storage.New(storagetest.NewFake(), validConfig())
+		storage.New(storagetest.NewFake(storagetest.Options{}), validConfig())
 	})
 }
 
 func TestNew_PerformsNoIO(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	f.SetDown(true)
 
 	s := storage.New(f, finalizedConfig(t, 0, 0))
@@ -188,7 +188,7 @@ func TestNew_PerformsNoIO(t *testing.T) {
 }
 
 func TestStore_NotReadyBeforeStart(t *testing.T) {
-	f := storagetest.NewFake(storagetest.WithCapabilities(storage.Capabilities{MaxKeyLength: 17}))
+	f := storagetest.NewFake(storagetest.Options{Capabilities: storage.Capabilities{MaxKeyLength: 17}})
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	wantNotReady(t, s, f)
@@ -208,7 +208,7 @@ func TestStore_NotReadyBeforeStart(t *testing.T) {
 }
 
 func TestStore_StartEnsuresThenProbesAndReports(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	if err := s.Start(context.Background()); err != nil {
@@ -236,7 +236,7 @@ func TestStore_StartEnsuresThenProbesAndReports(t *testing.T) {
 }
 
 func TestStore_StartCreatesMissingContainer(t *testing.T) {
-	f := storagetest.NewFake(storagetest.WithoutContainer())
+	f := storagetest.NewFake(storagetest.Options{NoContainer: true})
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	// The fake's Probe fails until the container exists, so a successful
@@ -260,7 +260,7 @@ func TestStore_StartCreatesMissingContainer(t *testing.T) {
 }
 
 func TestStore_StartFailureWrapsSentinelAndCause(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	f.SetDown(true)
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
@@ -295,7 +295,7 @@ func TestStore_StartFailureWrapsSentinelAndCause(t *testing.T) {
 
 func TestStore_StartWrapsUnclassifiedEnsureError(t *testing.T) {
 	cause := errors.New("raw ensure failure")
-	f := &ensureErrClient{Fake: storagetest.NewFake(), err: cause}
+	f := &ensureErrClient{Fake: storagetest.NewFake(storagetest.Options{}), err: cause}
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	err := s.Start(context.Background())
@@ -325,7 +325,7 @@ func TestStore_StartProbeFailureAfterEnsure(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &probeErrClient{Fake: storagetest.NewFake(), err: tc.err}
+			f := &probeErrClient{Fake: storagetest.NewFake(storagetest.Options{}), err: tc.err}
 			s := storage.New(f, finalizedConfig(t, 0, 0))
 
 			err := s.Start(context.Background())
@@ -369,7 +369,7 @@ type ensureErrClient struct {
 func (c *ensureErrClient) EnsureContainer(context.Context) error { return c.err }
 
 func TestStore_EnsureContainerNeedsNoReadiness(t *testing.T) {
-	f := storagetest.NewFake(storagetest.WithoutContainer())
+	f := storagetest.NewFake(storagetest.Options{NoContainer: true})
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 	ctx := context.Background()
 
@@ -430,7 +430,7 @@ func TestStore_EnsureContainerNeedsNoReadiness(t *testing.T) {
 
 func TestStore_EnsureContainerReturnsProviderError(t *testing.T) {
 	cause := errors.New("provider refused to create the container")
-	f := &ensureErrClient{Fake: storagetest.NewFake(), err: cause}
+	f := &ensureErrClient{Fake: storagetest.NewFake(storagetest.Options{}), err: cause}
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	// The provider's error passes through as is, with nothing wrapped
@@ -439,7 +439,7 @@ func TestStore_EnsureContainerReturnsProviderError(t *testing.T) {
 		t.Errorf("EnsureContainer = %v, want the provider's error unchanged", err)
 	}
 
-	down := storagetest.NewFake()
+	down := storagetest.NewFake(storagetest.Options{})
 	down.SetDown(true)
 	err := storage.New(down, finalizedConfig(t, 0, 0)).EnsureContainer(context.Background())
 	if !errors.Is(err, storage.ErrUnavailable) || !errors.Is(err, storagetest.ErrDown) {
@@ -452,7 +452,7 @@ func TestStore_EnsureContainerReturnsProviderError(t *testing.T) {
 
 func TestStore_Container(t *testing.T) {
 	cfg := finalizedConfig(t, 0, 0)
-	s := storage.New(storagetest.NewFake(), cfg)
+	s := storage.New(storagetest.NewFake(storagetest.Options{}), cfg)
 
 	if got := s.Container(); got != cfg.Container {
 		t.Errorf("Container() = %q, want the configured %q", got, cfg.Container)
@@ -460,7 +460,7 @@ func TestStore_Container(t *testing.T) {
 }
 
 func TestStore_ReadySelfHeals(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	s := startedStore(t, f, 0, 0)
 
 	f.SetDown(true)
@@ -480,7 +480,7 @@ func TestStore_ReadySelfHeals(t *testing.T) {
 }
 
 func TestStore_ProbeUsesCallerContext(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	s := startedStore(t, f, 0, 0)
 
 	if err := s.Probe(context.Background()); err != nil {
@@ -497,7 +497,7 @@ func TestStore_ProbeUsesCallerContext(t *testing.T) {
 }
 
 func TestStore_ShutdownClearsReadiness(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	s := startedStore(t, f, 0, 0)
 
 	if err := s.Shutdown(context.Background()); err != nil {
@@ -511,14 +511,14 @@ func TestStore_ShutdownClearsReadiness(t *testing.T) {
 
 func TestStore_ShutdownIsSafeAtEveryPoint(t *testing.T) {
 	t.Run("before Start", func(t *testing.T) {
-		s := storage.New(storagetest.NewFake(), finalizedConfig(t, 0, 0))
+		s := storage.New(storagetest.NewFake(storagetest.Options{}), finalizedConfig(t, 0, 0))
 		if err := s.Shutdown(context.Background()); err != nil {
 			t.Errorf("Shutdown before Start = %v, want nil", err)
 		}
 	})
 
 	t.Run("after a failed Start", func(t *testing.T) {
-		f := storagetest.NewFake()
+		f := storagetest.NewFake(storagetest.Options{})
 		f.SetDown(true)
 		s := storage.New(f, finalizedConfig(t, 0, 0))
 		if err := s.Start(context.Background()); err == nil {
@@ -530,7 +530,7 @@ func TestStore_ShutdownIsSafeAtEveryPoint(t *testing.T) {
 	})
 
 	t.Run("twice", func(t *testing.T) {
-		s := startedStore(t, storagetest.NewFake(), 0, 0)
+		s := startedStore(t, storagetest.NewFake(storagetest.Options{}), 0, 0)
 		for i := range 2 {
 			if err := s.Shutdown(context.Background()); err != nil {
 				t.Errorf("Shutdown call %d = %v, want nil", i+1, err)
@@ -561,7 +561,7 @@ func TestStore_StartAfterShutdownIsNotReady(t *testing.T) {
 }
 
 func TestStore_ShutdownDuringStartProbe(t *testing.T) {
-	f := &blockingProbeClient{Fake: storagetest.NewFake(), entered: make(chan struct{}), release: make(chan struct{})}
+	f := &blockingProbeClient{Fake: storagetest.NewFake(storagetest.Options{}), entered: make(chan struct{}), release: make(chan struct{})}
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	started := make(chan error, 1)
@@ -584,7 +584,7 @@ func TestStore_ShutdownDuringStartProbe(t *testing.T) {
 func TestStore_ShutdownDuringStartProbeThatFails(t *testing.T) {
 	// A closed transport fails the probe that Shutdown outlived.
 	closed := errors.New("transport closed")
-	f := &blockingProbeClient{Fake: storagetest.NewFake(), entered: make(chan struct{}), release: make(chan struct{}), err: closed}
+	f := &blockingProbeClient{Fake: storagetest.NewFake(storagetest.Options{}), entered: make(chan struct{}), release: make(chan struct{}), err: closed}
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	started := make(chan error, 1)
@@ -606,7 +606,7 @@ func TestStore_ShutdownDuringStartProbeThatFails(t *testing.T) {
 }
 
 func TestStore_ShutdownDuringStartEnsure(t *testing.T) {
-	f := &blockingEnsureClient{Fake: storagetest.NewFake(), entered: make(chan struct{}), release: make(chan struct{})}
+	f := &blockingEnsureClient{Fake: storagetest.NewFake(storagetest.Options{}), entered: make(chan struct{}), release: make(chan struct{})}
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	started := make(chan error, 1)
@@ -661,7 +661,7 @@ func (c *blockingEnsureClient) EnsureContainer(ctx context.Context) error {
 }
 
 func TestStore_StartReturnsCallerCancellation(t *testing.T) {
-	f := &ctxEnsureClient{Fake: storagetest.NewFake()}
+	f := &ctxEnsureClient{Fake: storagetest.NewFake(storagetest.Options{})}
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -681,7 +681,7 @@ func TestStore_StartReturnsCallerCancellation(t *testing.T) {
 func TestStore_StartCallerDeadlineOutranksProviderClassification(t *testing.T) {
 	// The provider reports the caller's expired deadline as an outage of its
 	// own, an error that does not match context.DeadlineExceeded.
-	f := &failingEnsureClient{Fake: storagetest.NewFake(), err: fmt.Errorf("%w: request timed out", storage.ErrUnavailable)}
+	f := &failingEnsureClient{Fake: storagetest.NewFake(storagetest.Options{}), err: fmt.Errorf("%w: request timed out", storage.ErrUnavailable)}
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
@@ -738,7 +738,7 @@ func TestStore_ShutdownClosesClientOnce(t *testing.T) {
 }
 
 func TestStore_ShutdownWithoutCloser(t *testing.T) {
-	s := startedStore(t, storagetest.NewFake(), 0, 0)
+	s := startedStore(t, storagetest.NewFake(storagetest.Options{}), 0, 0)
 
 	if err := s.Shutdown(context.Background()); err != nil {
 		t.Errorf("Shutdown = %v, want nil for a Client with no Close", err)
@@ -746,7 +746,7 @@ func TestStore_ShutdownWithoutCloser(t *testing.T) {
 }
 
 func TestStore_DelegatesRoundTrip(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	s := startedStore(t, f, 0, 0)
 	ctx := context.Background()
 
@@ -882,7 +882,7 @@ func TestStore_PutBound(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f := storagetest.NewFake()
+			f := storagetest.NewFake(storagetest.Options{})
 			s := startedStore(t, f, tc.maxSize, 0)
 			ctx := context.Background()
 
@@ -956,7 +956,7 @@ func TestStore_PutBoundReaderShapes(t *testing.T) {
 	}
 	for _, shape := range shapes {
 		t.Run(shape.name, func(t *testing.T) {
-			f := storagetest.NewFake()
+			f := storagetest.NewFake(storagetest.Options{})
 			s := startedStore(t, f, bound, 0)
 			ctx := context.Background()
 
@@ -984,7 +984,7 @@ func TestStore_PutBoundReaderShapes(t *testing.T) {
 }
 
 func TestStore_PutBoundKeepsClientCause(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	s := startedStore(t, f, 4, 0)
 
 	_, err := s.Put(context.Background(), "k", strings.NewReader("0123456789"), storage.PutOptions{})
@@ -1005,7 +1005,7 @@ func TestStore_PutBoundNamesBoundWhenClientErrorOmitsIt(t *testing.T) {
 	// reason still yields an error that names the bound and keeps the
 	// client's cause matchable.
 	cause := errors.New("provider closed the connection")
-	f := &lenientPutClient{Fake: storagetest.NewFake(), err: cause}
+	f := &lenientPutClient{Fake: storagetest.NewFake(storagetest.Options{}), err: cause}
 	s := startedStore(t, f, 4, 0)
 
 	_, err := s.Put(context.Background(), "k", strings.NewReader("0123456789"), storage.PutOptions{})
@@ -1018,7 +1018,7 @@ func TestStore_PutBoundNamesBoundWhenClientErrorOmitsIt(t *testing.T) {
 }
 
 func TestStore_PutDeclaredSizeErrorNamesBound(t *testing.T) {
-	s := startedStore(t, storagetest.NewFake(), 4, 0)
+	s := startedStore(t, storagetest.NewFake(storagetest.Options{}), 4, 0)
 
 	_, err := s.Put(context.Background(), "k", strings.NewReader("x"), storage.PutOptions{Size: 9})
 	want := "storage object too large: declared size 9 exceeds the configured max object size (4 bytes)"
@@ -1028,7 +1028,7 @@ func TestStore_PutDeclaredSizeErrorNamesBound(t *testing.T) {
 }
 
 func TestStore_PutBoundDoesNotReclassifyClientFailure(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	s := startedStore(t, f, 16, 0)
 	cause := errors.New("provider rejected the write")
 	f.FailPut(cause)
@@ -1045,7 +1045,7 @@ func TestStore_PutBoundDoesNotReclassifyClientFailure(t *testing.T) {
 func TestStore_PutBoundTripsEvenWhenClientSucceeds(t *testing.T) {
 	// A client that swallows the read error and reports success has stored a
 	// truncated object; the Store must still fail the Put.
-	f := &lenientPutClient{Fake: storagetest.NewFake()}
+	f := &lenientPutClient{Fake: storagetest.NewFake(storagetest.Options{})}
 	s := startedStore(t, f, 4, 0)
 
 	_, err := s.Put(context.Background(), "k", strings.NewReader("0123456789"), storage.PutOptions{})
@@ -1096,7 +1096,7 @@ func TestStore_PutDeclaredSize(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f := storagetest.NewFake()
+			f := storagetest.NewFake(storagetest.Options{})
 			s := startedStore(t, f, tc.maxSize, 0)
 			ctx := context.Background()
 
@@ -1160,7 +1160,7 @@ func TestStore_PutDeclaredSizeReaderShapes(t *testing.T) {
 	}
 	for _, shape := range shapes {
 		t.Run(shape.name, func(t *testing.T) {
-			f := storagetest.NewFake()
+			f := storagetest.NewFake(storagetest.Options{})
 			s := startedStore(t, f, 0, 0)
 			ctx := context.Background()
 
@@ -1197,7 +1197,7 @@ func TestStore_PutDeclaredSizeReaderShapes(t *testing.T) {
 func TestStore_PutDeclaredSizeTripsEvenWhenClientSucceeds(t *testing.T) {
 	// A client that swallows the read error and reports success has stored
 	// a body other than the declared one; the Store must still fail the Put.
-	f := &lenientPutClient{Fake: storagetest.NewFake()}
+	f := &lenientPutClient{Fake: storagetest.NewFake(storagetest.Options{})}
 	s := startedStore(t, f, 0, 0)
 	ctx := context.Background()
 
@@ -1219,7 +1219,7 @@ func TestStore_PutDeclaredSizeKeepsClientCause(t *testing.T) {
 	// tripped yields an error that names the declared size and keeps the
 	// client's cause matchable.
 	cause := errors.New("provider closed the connection")
-	f := &lenientPutClient{Fake: storagetest.NewFake(), err: cause}
+	f := &lenientPutClient{Fake: storagetest.NewFake(storagetest.Options{}), err: cause}
 	s := startedStore(t, f, 0, 0)
 
 	_, err := s.Put(context.Background(), "k", strings.NewReader("abc"), storage.PutOptions{Size: 5})
@@ -1232,7 +1232,7 @@ func TestStore_PutDeclaredSizeKeepsClientCause(t *testing.T) {
 }
 
 func TestStore_PutDeclaredSizeLeavesExistingObject(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	s := startedStore(t, f, 0, 0)
 	ctx := context.Background()
 	before := putString(t, s, "k", "the original")
@@ -1250,7 +1250,7 @@ func TestStore_PutDeclaredSizeLeavesExistingObject(t *testing.T) {
 }
 
 func TestStore_PutRejectsNegativeSize(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	s := startedStore(t, f, 0, 0)
 
 	_, err := s.Put(context.Background(), "k", strings.NewReader("v"), storage.PutOptions{Size: -1})
@@ -1264,7 +1264,7 @@ func TestStore_PutRejectsNegativeSize(t *testing.T) {
 
 func TestStore_PutValidatesKey(t *testing.T) {
 	rejected := errors.New("key rejected")
-	f := storagetest.NewFake(storagetest.WithCapabilities(storage.Capabilities{
+	f := storagetest.NewFake(storagetest.Options{Capabilities: storage.Capabilities{
 		MaxKeyLength: 8,
 		ValidateKey: func(key string) error {
 			if strings.HasPrefix(key, "/") {
@@ -1272,7 +1272,7 @@ func TestStore_PutValidatesKey(t *testing.T) {
 			}
 			return nil
 		},
-	}))
+	}})
 	s := startedStore(t, f, 0, 0)
 
 	if _, err := s.Put(context.Background(), "/abs", strings.NewReader("v"), storage.PutOptions{}); !errors.Is(err, rejected) {
@@ -1285,7 +1285,7 @@ func TestStore_PutValidatesKey(t *testing.T) {
 }
 
 func TestStore_PutNilValidateKeyAcceptsEveryKey(t *testing.T) {
-	f := storagetest.NewFake(storagetest.WithCapabilities(storage.Capabilities{MaxKeyLength: 1024}))
+	f := storagetest.NewFake(storagetest.Options{Capabilities: storage.Capabilities{MaxKeyLength: 1024}})
 	s := startedStore(t, f, 0, 0)
 
 	for _, key := range []string{"", "/abs", "a//b", strings.Repeat("k", 2048)} {
@@ -1312,7 +1312,7 @@ func TestStore_ListLimit(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f := storagetest.NewFake()
+			f := storagetest.NewFake(storagetest.Options{})
 			s := startedStore(t, f, 0, tc.pageSize)
 
 			if _, err := s.List(context.Background(), storage.ListOptions{Prefix: "p/", Limit: tc.limit}); err != nil {
@@ -1330,7 +1330,7 @@ func TestStore_ListLimit(t *testing.T) {
 }
 
 func TestStore_ListRejectsNegativeLimit(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	s := startedStore(t, f, 0, 25)
 
 	// A first valid call leaves a marker, so a rejected call is provably one
@@ -1351,7 +1351,7 @@ func TestStore_ListRejectsNegativeLimit(t *testing.T) {
 }
 
 func TestStore_CapabilitiesPassThrough(t *testing.T) {
-	f := storagetest.NewFake(storagetest.WithCapabilities(storage.Capabilities{
+	f := storagetest.NewFake(storagetest.Options{Capabilities: storage.Capabilities{
 		MaxKeyLength: 1024,
 		ValidateKey: func(key string) error {
 			if strings.HasPrefix(key, "/") {
@@ -1359,7 +1359,7 @@ func TestStore_CapabilitiesPassThrough(t *testing.T) {
 			}
 			return nil
 		},
-	}))
+	}})
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
 	got := s.Capabilities()
@@ -1378,7 +1378,7 @@ func TestStore_CapabilitiesPassThrough(t *testing.T) {
 }
 
 func TestStore_ConcurrentUse(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	s := startedStore(t, f, 64, 10)
 	ctx := context.Background()
 	const workers = 8
@@ -1431,7 +1431,7 @@ type closingFake struct {
 }
 
 func newClosingFake(closeErr error) *closingFake {
-	return &closingFake{Fake: storagetest.NewFake(), closeErr: closeErr}
+	return &closingFake{Fake: storagetest.NewFake(storagetest.Options{}), closeErr: closeErr}
 }
 
 func (c *closingFake) Close() error {

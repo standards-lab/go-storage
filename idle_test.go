@@ -56,7 +56,7 @@ func idleStore(t *testing.T, c storage.Client) *storage.Store {
 // limit: the read fails with ErrUnavailable and the Get's request is
 // cancelled, after the bytes that arrived were read.
 func TestStore_GetCutsOffAStalledBody(t *testing.T) {
-	c := &stallingClient{Fake: storagetest.NewFake(), head: "partial"}
+	c := &stallingClient{Fake: storagetest.NewFake(storagetest.Options{}), head: "partial"}
 	blob, err := idleStore(t, c).Get(context.Background(), "k", storage.GetOptions{})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -78,7 +78,7 @@ func TestStore_GetCutsOffAStalledBody(t *testing.T) {
 // A caller that reads slowly is never cut off: the limit times a read in
 // progress, not the time between reads.
 func TestStore_GetLetsACallerReadSlowly(t *testing.T) {
-	f := storagetest.NewFake()
+	f := storagetest.NewFake(storagetest.Options{})
 	s := idleStore(t, f)
 	ctx := context.Background()
 	if _, err := s.Put(ctx, "k", strings.NewReader("abc"), storage.PutOptions{Size: 3}); err != nil {
@@ -109,7 +109,7 @@ func TestStore_GetLetsACallerReadSlowly(t *testing.T) {
 
 // Closing the body releases the Get's request.
 func TestStore_GetCloseCancelsTheRequest(t *testing.T) {
-	c := &stallingClient{Fake: storagetest.NewFake()}
+	c := &stallingClient{Fake: storagetest.NewFake(storagetest.Options{})}
 	blob, err := idleStore(t, c).Get(context.Background(), "k", storage.GetOptions{})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -138,7 +138,7 @@ func (c *failingGetClient) Get(ctx context.Context, _ string, _ storage.GetOptio
 // A Get the provider fails returns the provider's error and releases the
 // request it opened.
 func TestStore_GetFailureReleasesTheRequest(t *testing.T) {
-	c := &failingGetClient{Fake: storagetest.NewFake(), err: storage.ErrNotFound}
+	c := &failingGetClient{Fake: storagetest.NewFake(storagetest.Options{}), err: storage.ErrNotFound}
 	if _, err := idleStore(t, c).Get(context.Background(), "k", storage.GetOptions{}); !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("Get = %v, want the provider's ErrNotFound", err)
 	}
@@ -150,7 +150,7 @@ func TestStore_GetFailureReleasesTheRequest(t *testing.T) {
 // A stalled read's error matches ErrUnavailable alone: the cancellation the
 // idle timer made is not the caller's context's.
 func TestStore_GetStallIsNotTheCallersCancellation(t *testing.T) {
-	c := &stallingClient{Fake: storagetest.NewFake()}
+	c := &stallingClient{Fake: storagetest.NewFake(storagetest.Options{})}
 	blob, err := idleStore(t, c).Get(context.Background(), "k", storage.GetOptions{})
 	if err != nil {
 		t.Fatalf("Get: %v", err)

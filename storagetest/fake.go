@@ -20,13 +20,13 @@ import (
 
 var _ storage.Client = (*Fake)(nil)
 
-// DefaultMaxKeyLength is the MaxKeyLength a Fake declares when no
-// WithCapabilities option replaces it.
+// DefaultMaxKeyLength is the MaxKeyLength a Fake declares when
+// Options.Capabilities does not replace it.
 const DefaultMaxKeyLength = 1024
 
-// defaultPageSize is the page size List uses when Limit is 0 and no
-// WithPageSize option replaces it. It is small so a test that lists more than
-// a handful of objects pages.
+// defaultPageSize is the page size List uses when Limit is 0 and
+// Options.PageSize does not replace it. It is small so a test that lists
+// more than a handful of objects pages.
 const defaultPageSize = 3
 
 // defaultContentType is the ContentType a Put without one stores.
@@ -52,7 +52,7 @@ var (
 //
 // While [Fake.SetDown] has it down, every method fails with an error matching
 // storage.ErrUnavailable that wraps ErrDown. While its container does not
-// exist ([WithoutContainer], [Fake.DropContainer]), Probe and every object
+// exist ([Options.NoContainer], [Fake.DropContainer]), Probe and every object
 // operation fail with an error matching storage.ErrContainerNotFound that
 // wraps ErrNoSuchContainer, and EnsureContainer creates it.
 //
@@ -62,7 +62,7 @@ type Fake struct {
 	// down is the outage toggle. Every method consults it.
 	down atomic.Bool
 
-	// hasContainer is the container toggle. WithoutContainer and
+	// hasContainer is the container toggle. Options.NoContainer and
 	// DropContainer clear it, and EnsureContainer sets it.
 	hasContainer atomic.Bool
 
@@ -102,40 +102,32 @@ type object struct {
 	data []byte
 }
 
-// Option configures a Fake at construction.
-type Option func(*Fake)
+// Options configures a Fake at construction. The zero Options gives the
+// defaults: time.Now as the clock, a List page size of 3, the default key
+// rules, and an existing container.
+type Options struct {
+	// Clock supplies the time stamped on every Put as ModifiedAt, which the
+	// Fake converts to UTC as the contract requires. Nil means time.Now.
+	Clock func() time.Time
 
-// WithClock supplies the time stamped on every Put as ModifiedAt, which the
-// Fake converts to UTC as the contract requires. The default is time.Now.
-func WithClock(now func() time.Time) Option {
-	return func(f *Fake) { f.now = now }
+	// PageSize is the page size List uses when Limit is 0. Zero or less
+	// means 3, so a listing of a few objects already pages.
+	PageSize int
+
+	// Capabilities is what Fake.Capabilities returns when its MaxKeyLength
+	// or ValidateKey is set. It replaces the default whole, so a set
+	// MaxKeyLength with a nil ValidateKey accepts every key. When neither is
+	// set, the Fake declares DefaultMaxKeyLength and a ValidateKey that
+	// rejects an empty key and a key longer than that, counted in runes.
+	Capabilities storage.Capabilities
+
+	// NoContainer starts the Fake with no container, so a test can watch
+	// EnsureContainer create it.
+	NoContainer bool
 }
 
-// WithPageSize sets the page size List uses when Limit is 0. The default is
-// 3, so a listing of a few objects already pages; an n of 0 or less keeps it.
-func WithPageSize(n int) Option {
-	return func(f *Fake) {
-		if n > 0 {
-			f.pageSize = n
-		}
-	}
-}
-
-// WithCapabilities replaces what Capabilities returns. The default declares
-// DefaultMaxKeyLength and a ValidateKey that rejects an empty key and a key
-// longer than that, counted in runes.
-func WithCapabilities(c storage.Capabilities) Option {
-	return func(f *Fake) { f.caps = c }
-}
-
-// WithoutContainer starts the Fake with no container, so a test can watch
-// EnsureContainer create it.
-func WithoutContainer() Option {
-	return func(f *Fake) { f.hasContainer.Store(false) }
-}
-
-// NewFake returns an empty Fake whose container exists, configured by opts.
-func NewFake(opts ...Option) *Fake {
+// NewFake returns an empty Fake configured by opts.
+func NewFake(opts Options) *Fake {
 	f := &Fake{
 		now:      time.Now,
 		pageSize: defaultPageSize,
@@ -145,10 +137,16 @@ func NewFake(opts ...Option) *Fake {
 		},
 		objects: make(map[string]object),
 	}
-	f.hasContainer.Store(true)
-	for _, opt := range opts {
-		opt(f)
+	if opts.Clock != nil {
+		f.now = opts.Clock
 	}
+	if opts.PageSize > 0 {
+		f.pageSize = opts.PageSize
+	}
+	if opts.Capabilities.MaxKeyLength != 0 || opts.Capabilities.ValidateKey != nil {
+		f.caps = opts.Capabilities
+	}
+	f.hasContainer.Store(!opts.NoContainer)
 	return f
 }
 
