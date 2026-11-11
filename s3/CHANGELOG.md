@@ -7,6 +7,25 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.2.0] - 2026-11-11
+
+### Changed
+
+- **Breaking:** The `go-storage` requirement is v0.7.0, which requires `go-core` v0.11.0. An
+  importer that relies on what go-core changes from v0.7.0 to v0.11.0 breaks, since the
+  requirement pulls v0.11.0 into its build: `graph.Scope.After` is removed in favor of
+  `graph.After` at `Define`, `Observe` takes a `func(graph.Ref)`, a node name may not contain a
+  comma or a newline, `graph.Dependency` gains a `Ref` field, a `Monitored` failure reads
+  `run: <node>: <error>`, and `Coordinator.Checks` lists only a `ReadyStarter`. The base
+  module's v0.7.0 entry details each.
+- aws-sdk-go-v2 is v1.48.0 and its `credentials` v1.21.0, which make Retry Behavior 2.1 the
+  standard retryer's default. `max_retries` and a `Get` body's resumptions behave as before:
+  unset still means the SDK's three attempts, so two retries per request and per read. The SDK
+  no longer reads the `AWS_NEW_RETRIES_2026` environment variable, which the package
+  documentation named as changing the backoff and the retry quota.
+- `feature/s3/transfermanager` is v0.5.7, `service/s3` v1.114.10, and `smithy-go` v1.28.9.
+  transfermanager's v0.5.0 changes only `DownloadDirectory`, which `Put` does not use.
+
 ## [v0.1.0] - 2026-10-09
 
 ### Added
@@ -46,5 +65,6 @@ changelog covers this sub-module only; the base module keeps its own.
   `Date` when the `HeadObject` fails or finds another version.
 - Requires `github.com/standards-lab/go-storage` v0.6.0.
 
-[Unreleased]: https://github.com/standards-lab/go-storage/compare/s3/v0.1.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-storage/compare/s3/v0.2.0...HEAD
+[v0.2.0]: https://github.com/standards-lab/go-storage/releases/tag/s3/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-storage/releases/tag/s3/v0.1.0

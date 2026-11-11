@@ -14,7 +14,7 @@ and `--loose` (`compose/azurite/Dockerfile`), and no live Azure account has run 
   Azurite's is the last key of the page, and Azure's is documented as an opaque token.
 
 Four claims the standard tier rests on concern S3. `s3` passes the conformance suite against
-SeaweedFS 4.48's S3 gateway, the image `compose/seaweedfs/Dockerfile` pins, started with
+SeaweedFS 4.53's S3 gateway, the image `compose/seaweedfs/Dockerfile` pins, started with
 `-s3.autoCreateBucket=false`, and each claim has a test against it; no live AWS account has run
 them:
 
@@ -53,7 +53,8 @@ them:
 
 SeaweedFS differs from AWS where the tests had to accommodate it or where the adapter relies on
 neither behavior. Each SeaweedFS side was observed against 4.48, in the s3 spike or the acceptance
-tests; each AWS side is from AWS's documentation and untested:
+tests, and the acceptance tests pass against 4.53; each AWS side is from AWS's documentation and
+untested:
 
 - **A write to a missing bucket.** SeaweedFS creates the bucket on an admin's upload unless
   `-s3.autoCreateBucket=false`; AWS answers `NoSuchBucket`. With the default on, the

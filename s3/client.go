@@ -113,10 +113,8 @@ func New(cfg storage.Config) (*Client, error) {
 	// awss3.New, unlike config.LoadDefaultConfig, loads no shared config or
 	// credentials file and takes none of these options from the
 	// environment, so the Config sets every option it builds. The SDK does
-	// still read environment variables of its own: the standard retryer
-	// reads AWS_NEW_RETRIES_2026, which changes its backoff and retry-quota
-	// defaults, and request middleware reads a few that only shape headers
-	// such as the user agent.
+	// still read environment variables of its own: request middleware reads
+	// a few that only shape headers such as the user agent.
 	opts := awss3.Options{
 		Region:           region,
 		Credentials:      credentials.NewStaticCredentialsProvider(cfg.Account, cfg.Key, ""),

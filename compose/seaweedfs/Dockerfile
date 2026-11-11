@@ -1,6 +1,6 @@
 # The harness's SeaweedFS: the single-process `weed mini` whose S3 gateway s3's
 # acceptance tests run against, on 8333. This FROM line is SeaweedFS's one pin.
-FROM chrislusf/seaweedfs:4.48
+FROM chrislusf/seaweedfs:4.53
 
 # The gateway's admin identity, which SeaweedFS reads at startup and the s3
 # acceptance tests sign with.

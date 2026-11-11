@@ -41,9 +41,7 @@
 //     a transport error or a retryable answer (a 5xx status, a throttling
 //     code), as a non-negative integer. 0 means one try. Unset keeps the SDK
 //     default: three attempts, with jittered exponential backoff. The
-//     backoff and the retry quota are the SDK standard retryer's defaults,
-//     which its AWS_NEW_RETRIES_2026 environment variable changes when set
-//     to "true".
+//     backoff and the retry quota are the SDK standard retryer's defaults.
 //   - part_size: the size of one part of a multipart upload, in bytes, from
 //     5 MiB (5242880), S3's smallest part, to 5 GiB (5368709120), its
 //     largest. Unset means 8 MiB. Put sends a body of up to one part as a
@@ -141,7 +139,7 @@
 //
 // The module pins aws-sdk-go-v2's service/s3, its credentials and smithy-go,
 // and feature/s3/transfermanager for multipart upload. transfermanager is
-// v0 (v0.4.15), held as a stated exception the way go-observability holds
+// v0 (v0.5.7), held as a stated exception the way go-observability holds
 // otelhttp: AWS has not released it past v0, it is the maintained successor
 // to the deprecated feature/s3/manager, it is maintained by the project
 // that defines the ecosystem, and it adds no dependency beyond the SDK
