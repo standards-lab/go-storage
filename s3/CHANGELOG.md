@@ -12,12 +12,12 @@ changelog covers this sub-module only; the base module keeps its own.
 ### Changed
 
 - **Breaking:** The `go-storage` requirement is v0.7.0, which requires `go-core` v0.11.0. An
-  importer breaks that relies on what go-core changes from v0.7.0 to v0.11.0, since the
-  requirement pulls v0.11.0 into its build: `graph.Scope.After` is removed in favor of `graph.After` at `Define`, `Observe`
-  takes a `func(graph.Ref)`, a node name may not contain a comma or a newline,
-  `graph.Dependency` gains a `Ref` field, a `Monitored` failure reads `run: <node>: <error>`,
-  and `Coordinator.Checks` lists only a `ReadyStarter`. The base module's v0.7.0 entry details
-  each.
+  importer that relies on what go-core changes from v0.7.0 to v0.11.0 breaks, since the
+  requirement pulls v0.11.0 into its build: `graph.Scope.After` is removed in favor of
+  `graph.After` at `Define`, `Observe` takes a `func(graph.Ref)`, a node name may not contain a
+  comma or a newline, `graph.Dependency` gains a `Ref` field, a `Monitored` failure reads
+  `run: <node>: <error>`, and `Coordinator.Checks` lists only a `ReadyStarter`. The base
+  module's v0.7.0 entry details each.
 - aws-sdk-go-v2 is v1.48.0 and its `credentials` v1.21.0, which make Retry Behavior 2.1 the
   standard retryer's default. `max_retries` and a `Get` body's resumptions behave as before:
   unset still means the SDK's three attempts, so two retries per request and per read. The SDK
