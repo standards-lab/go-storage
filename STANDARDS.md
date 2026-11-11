@@ -11,5 +11,6 @@ The judgement calls the standards-reviewer applies to go-storage, beyond what `m
 - `architecture/standards/go-elemental/principles/timeouts.md`: `azureblob`'s and `s3`'s `try_timeout` and the `Get` body that resumes past it, under `Config.ReadIdleTimeout`; the retry budget of `max_retries` tries, spent into `ErrUnavailable`; and `Put`'s unclassified body failure, read `block_size` times `concurrency` ahead of the store on `azureblob` and `part_size` times (`concurrency` + 2) on `s3`.
 - `architecture/standards/go-elemental/principles/baseline-standards.md`: `Config`'s `MaxObjectSize`, `ListPageSize`, `RequestTimeout` and `ReadIdleTimeout`.
 - `architecture/standards/go-elemental/principles/utc-times.md`: `Object.ModifiedAt` in the contract, `storagetest.Fake`, the conformance suite's Location checks, and the times `azureblob` and `s3` parse.
+- `architecture/standards/go-elemental/principles/construction-and-execution.md`: every new exported function and constructor, `storagetest`'s included; an existing `storagetest` helper converts at the package's next breaking release.
 - `architecture/principles/service-tiers.md`: `Client` and the `azureblob` and `s3` adapters beneath it.
 - `architecture/principles/context-architecture.md`: the README, `docs/design.md` and each `doc.go` are the homes.
