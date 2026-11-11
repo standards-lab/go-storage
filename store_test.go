@@ -14,18 +14,44 @@ import (
 	"time"
 
 	"github.com/standards-lab/go-core/config"
+	"github.com/standards-lab/go-core/graph"
 	"github.com/standards-lab/go-core/lifecycle"
 	"github.com/standards-lab/go-storage"
 	"github.com/standards-lab/go-storage/storagetest"
 )
 
 // A *Store takes part in a lifecycle.Coordinator's startup, shutdown, and
-// readiness as the Value of a graph.Dependency, with no adapter.
+// readiness as the Value of a graph.Dependency, with no adapter. It is a
+// ReadyStarter, the only kind of value Coordinator.Checks infers a readiness
+// check from.
 var (
-	_ storage.Client             = (*storage.Store)(nil)
-	_ lifecycle.Subsystem        = (*storage.Store)(nil)
-	_ lifecycle.ReadinessChecker = (*storage.Store)(nil)
+	_ storage.Client         = (*storage.Store)(nil)
+	_ lifecycle.Subsystem    = (*storage.Store)(nil)
+	_ lifecycle.ReadyStarter = (*storage.Store)(nil)
 )
+
+// A Store defined as a graph node is listed among a Coordinator's Checks
+// under the node's name, holding the Store itself, as doc.go promises a
+// composition root.
+func TestStore_CoordinatorChecksItUnderItsNodeName(t *testing.T) {
+	s := storage.New(storagetest.NewFake(), finalizedConfig(t, 0, 0))
+	g := graph.New()
+	node := g.Value("storage", s)
+	sys, err := g.Build(node)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	checks := lifecycle.New(sys, lifecycle.Config{ShutdownTimeout: config.Duration(time.Second)}).Checks()
+	if len(checks) != 1 {
+		t.Fatalf("Checks: got %d, want 1: %+v", len(checks), checks)
+	}
+	if checks[0].Name != "storage" {
+		t.Errorf("Check name: got %q, want %q", checks[0].Name, "storage")
+	}
+	if checks[0].Checker != s {
+		t.Errorf("Check checker: got %v, want the Store", checks[0].Checker)
+	}
+}
 
 // testTimeout is the RequestTimeout every finalized test Config carries, so
 // the probe-deadline assertions have a known bound to check against.
