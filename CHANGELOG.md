@@ -15,10 +15,10 @@ which makes the same change to its own constructors.
 
 ### Added
 
-- `storagetest.Options`, which configures a `Fake`. `Clock` is the time it stamps on a `Put`, in
-  UTC, `PageSize` is the page size of a `List` without a `Limit`, `Capabilities` replaces the
+- `storagetest.Options`, which configures a `Fake`. `Clock` supplies the time a `Put` stamps, in
+  UTC. `PageSize` sets the page size of a `List` without a `Limit`. `Capabilities` replaces the
   default key rules, and `NoContainer` starts the Fake with no container. A nil `Clock` keeps
-  `time.Now` and a `PageSize` of 0 or less keeps 3. A `Capabilities` whose `MaxKeyLength` or
+  `time.Now`, and a `PageSize` of 0 or less keeps 3. A `Capabilities` whose `MaxKeyLength` or
   `ValidateKey` is set replaces the default whole, so a `MaxKeyLength` with a nil `ValidateKey`
   accepts every key; one with neither set keeps the default.
 

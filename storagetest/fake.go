@@ -114,8 +114,8 @@ type Options struct {
 	// means 3, so a listing of a few objects already pages.
 	PageSize int
 
-	// Capabilities replaces what Capabilities returns when its MaxKeyLength
-	// or ValidateKey is set, and it replaces the default whole: a set
+	// Capabilities is what Fake.Capabilities returns when its MaxKeyLength
+	// or ValidateKey is set. It replaces the default whole, so a set
 	// MaxKeyLength with a nil ValidateKey accepts every key. When neither is
 	// set, the Fake declares DefaultMaxKeyLength and a ValidateKey that
 	// rejects an empty key and a key longer than that, counted in runes.
