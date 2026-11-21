@@ -48,8 +48,6 @@ func TestRunMissingContainer_Fake(t *testing.T) {
 	})
 }
 
-// A started Store whose container was dropped behind it passes the
-// provider's classification through.
 func TestRunMissingContainer_Store(t *testing.T) {
 	storagetest.RunMissingContainer(t, func(t *testing.T) storage.Client {
 		cfg := storage.Config{Container: "gone"}
@@ -66,15 +64,8 @@ func TestRunMissingContainer_Store(t *testing.T) {
 	})
 }
 
-// childEnv names the broken client a test runs the suite over when it runs
-// as the child process its parent starts. A suite that catches a broken
-// client fails the test it runs in, so the parent runs it in a child and
-// reads the child's verdict from its exit status and output.
 const childEnv = "STORAGETEST_BROKEN_CLIENT"
 
-// runChild reruns the test binary with childEnv set to client, running only
-// the tests run matches, and returns the child's output and whether it
-// failed.
 func runChild(t *testing.T, run, client string) (string, bool) {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.v", "-test.run="+run)
@@ -87,7 +78,6 @@ func runChild(t *testing.T, run, client string) (string, bool) {
 	return string(out), err != nil
 }
 
-// notFoundOnDelete reports ErrNotFound from a Delete of a missing key.
 type notFoundOnDelete struct{ *storagetest.Fake }
 
 func (c *notFoundOnDelete) Delete(ctx context.Context, key string) error {
@@ -97,8 +87,6 @@ func (c *notFoundOnDelete) Delete(ctx context.Context, key string) error {
 	return c.Fake.Delete(ctx, key)
 }
 
-// keepsContentType leaves the stored ContentType as it was when it replaces
-// an object, the way a provider does when a replace omits the header.
 type keepsContentType struct{ *storagetest.Fake }
 
 func (c *keepsContentType) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
@@ -108,7 +96,6 @@ func (c *keepsContentType) Put(ctx context.Context, key string, body io.Reader, 
 	return c.Fake.Put(ctx, key, body, opts)
 }
 
-// seekOnly refuses a body it cannot seek.
 type seekOnly struct{ *storagetest.Fake }
 
 func (c *seekOnly) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
@@ -118,14 +105,12 @@ func (c *seekOnly) Put(ctx context.Context, key string, body io.Reader, opts sto
 	return c.Fake.Put(ctx, key, body, opts)
 }
 
-// truncatingPut stores at most the first 1 MiB of a body.
 type truncatingPut struct{ *storagetest.Fake }
 
 func (c *truncatingPut) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
 	return c.Fake.Put(ctx, key, io.LimitReader(body, 1<<20), opts)
 }
 
-// emptyETag reports no ETag from Put.
 type emptyETag struct{ *storagetest.Fake }
 
 func (c *emptyETag) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
@@ -134,7 +119,6 @@ func (c *emptyETag) Put(ctx context.Context, key string, body io.Reader, opts st
 	return obj, err
 }
 
-// onePageList never returns a continuation token.
 type onePageList struct{ *storagetest.Fake }
 
 func (c *onePageList) List(ctx context.Context, opts storage.ListOptions) (storage.Page, error) {
@@ -143,7 +127,6 @@ func (c *onePageList) List(ctx context.Context, opts storage.ListOptions) (stora
 	return page, err
 }
 
-// ignoresPrefix lists the whole container whatever the Prefix.
 type ignoresPrefix struct{ *storagetest.Fake }
 
 func (c *ignoresPrefix) List(ctx context.Context, opts storage.ListOptions) (storage.Page, error) {
@@ -151,7 +134,6 @@ func (c *ignoresPrefix) List(ctx context.Context, opts storage.ListOptions) (sto
 	return c.Fake.List(ctx, opts)
 }
 
-// ensureOnce fails EnsureContainer when the container already exists.
 type ensureOnce struct{ *storagetest.Fake }
 
 func (c *ensureOnce) EnsureContainer(ctx context.Context) error {
@@ -161,15 +143,12 @@ func (c *ensureOnce) EnsureContainer(ctx context.Context) error {
 	return c.Fake.EnsureContainer(ctx)
 }
 
-// permissiveKeys accepts every key, the empty one included.
 type permissiveKeys struct{ *storagetest.Fake }
 
 func (c *permissiveKeys) Capabilities() storage.Capabilities {
 	return storage.Capabilities{MaxKeyLength: 1, ValidateKey: func(string) error { return nil }}
 }
 
-// unquotedListETag strips the quotes from every ETag a listing reports, the
-// way a provider does when it copies a listing's XML value verbatim.
 type unquotedListETag struct{ *storagetest.Fake }
 
 func (c *unquotedListETag) List(ctx context.Context, opts storage.ListOptions) (storage.Page, error) {
@@ -180,7 +159,6 @@ func (c *unquotedListETag) List(ctx context.Context, opts storage.ListOptions) (
 	return page, err
 }
 
-// statETagDiffers reports an ETag from Stat other than the one Put reported.
 type statETagDiffers struct{ *storagetest.Fake }
 
 func (c *statETagDiffers) Stat(ctx context.Context, key string) (storage.Object, error) {
@@ -189,8 +167,6 @@ func (c *statETagDiffers) Stat(ctx context.Context, key string) (storage.Object,
 	return obj, err
 }
 
-// commitsPartialBody stores the bytes it read before the body failed and
-// then returns the body's error.
 type commitsPartialBody struct{ *storagetest.Fake }
 
 func (c *commitsPartialBody) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
@@ -203,7 +179,6 @@ func (c *commitsPartialBody) Put(ctx context.Context, key string, body io.Reader
 	return obj, err
 }
 
-// ignoresSize stores the whole body whatever Size says.
 type ignoresSize struct{ *storagetest.Fake }
 
 func (c *ignoresSize) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
@@ -211,7 +186,6 @@ func (c *ignoresSize) Put(ctx context.Context, key string, body io.Reader, opts 
 	return c.Fake.Put(ctx, key, body, opts)
 }
 
-// truncatesToSize stores the first Size bytes of a longer body.
 type truncatesToSize struct{ *storagetest.Fake }
 
 func (c *truncatesToSize) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
@@ -222,8 +196,6 @@ func (c *truncatesToSize) Put(ctx context.Context, key string, body io.Reader, o
 	return c.Fake.Put(ctx, key, body, opts)
 }
 
-// overwritesBeforeFailing removes the existing object before it reads the
-// body, so a body that fails leaves the key empty.
 type overwritesBeforeFailing struct{ *storagetest.Fake }
 
 func (c *overwritesBeforeFailing) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
@@ -233,8 +205,6 @@ func (c *overwritesBeforeFailing) Put(ctx context.Context, key string, body io.R
 	return c.Fake.Put(ctx, key, body, opts)
 }
 
-// alsoClassifies wraps a missing key's error under a second sentinel as
-// well, so it matches ErrNotFound and also.
 type alsoClassifies struct {
 	*storagetest.Fake
 	also error
@@ -257,8 +227,6 @@ func (c *alsoClassifies) wrap(err error) error {
 	return err
 }
 
-// noDefaultContentType reports an empty ContentType for a Put without one,
-// where the contract asks for application/octet-stream.
 type noDefaultContentType struct{ *storagetest.Fake }
 
 func (c *noDefaultContentType) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
@@ -269,10 +237,6 @@ func (c *noDefaultContentType) Put(ctx context.Context, key string, body io.Read
 	return obj, err
 }
 
-// nonUTCModifiedAt reports Put's, Get's, and Stat's ModifiedAt in a fixed
-// GMT zone, the way a provider does that keeps the zone its SDK parsed an
-// RFC 1123 header in. The instant is unchanged, so only the zone check
-// catches it.
 type nonUTCModifiedAt struct{ *storagetest.Fake }
 
 var gmt = time.FixedZone("GMT", 0)
@@ -295,7 +259,6 @@ func (c *nonUTCModifiedAt) Stat(ctx context.Context, key string) (storage.Object
 	return obj, err
 }
 
-// nonUTCListModifiedAt reports List's ModifiedAt in a fixed GMT zone.
 type nonUTCListModifiedAt struct{ *storagetest.Fake }
 
 func (c *nonUTCListModifiedAt) List(ctx context.Context, opts storage.ListOptions) (storage.Page, error) {
@@ -306,9 +269,6 @@ func (c *nonUTCListModifiedAt) List(ctx context.Context, opts storage.ListOption
 	return page, err
 }
 
-// brokenClients are the clients TestRun_CatchesBrokenClients runs the suite
-// over, each named for the contract it breaks, with the suite case that
-// must fail it.
 var brokenClients = []struct {
 	name    string
 	client  func() storage.Client
@@ -345,8 +305,6 @@ var brokenClients = []struct {
 	{"List reports ModifiedAt outside UTC", func() storage.Client { return &nonUTCListModifiedAt{storagetest.NewFake(storagetest.Options{})} }, "List"},
 }
 
-// Run fails the case that proves the contract a broken client breaks. As
-// the child, the test runs Run over the client childEnv names.
 func TestRun_CatchesBrokenClients(t *testing.T) {
 	if name := os.Getenv(childEnv); name != "" {
 		for _, bc := range brokenClients {
@@ -369,22 +327,16 @@ func TestRun_CatchesBrokenClients(t *testing.T) {
 	}
 }
 
-// notFoundContainer reports a missing container the way v0.1.0 providers
-// did, as a missing object, which the missing-container check must reject.
 type notFoundContainer struct{ *storagetest.Fake }
 
 func (c notFoundContainer) Probe(context.Context) error {
 	return fmt.Errorf("%w: container gone", storage.ErrNotFound)
 }
 
-// swallowsContainer treats a missing container on Delete as the idempotent
-// success of a missing key, the likeliest regression.
 type swallowsContainer struct{ *storagetest.Fake }
 
 func (c swallowsContainer) Delete(context.Context, string) error { return nil }
 
-// createsContainer creates its container on a Put, as a provider that
-// provisions on demand would.
 type createsContainer struct{ *storagetest.Fake }
 
 func (c createsContainer) Put(ctx context.Context, key string, body io.Reader, opts storage.PutOptions) (storage.Object, error) {
@@ -394,13 +346,8 @@ func (c createsContainer) Put(ctx context.Context, key string, body io.Reader, o
 	return c.Fake.Put(ctx, key, body, opts)
 }
 
-// missingContainerOps are the operations RunMissingContainer checks, by the
-// name its failures give them.
 var missingContainerOps = []string{"Probe", "Put", "Get", "Stat", "Delete", "List"}
 
-// RunMissingContainer fails each operation a broken client misclassifies
-// and no other. As the child, the test runs RunMissingContainer over the
-// client childEnv names.
 func TestRunMissingContainer_CatchesBrokenClients(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -440,10 +387,6 @@ func TestRunMissingContainer_CatchesBrokenClients(t *testing.T) {
 	}
 }
 
-// A client whose Put creates the container fails RunMissingContainer, and
-// the object it stored is deleted when the check's test ends. As the child,
-// the test runs the check in a subtest and then reports what the store
-// holds.
 func TestRunMissingContainer_CleansUpAStrayPut(t *testing.T) {
 	const client = "createsContainer"
 	if os.Getenv(childEnv) == client {

@@ -8,23 +8,18 @@ import (
 	"unicode/utf8"
 )
 
-// maxKeyLength is the longest key S3 accepts, in bytes of UTF-8.
 const maxKeyLength = 1024
 
-// The bucket-name length limits the package documentation lists.
 const (
 	minBucketLength = 3
 	maxBucketLength = 63
 )
 
-// The bucket-name prefixes and suffixes S3 reserves for its own features.
 var (
 	reservedBucketPrefixes = []string{"xn--", "sthree-", "amzn-s3-demo-"}
 	reservedBucketSuffixes = []string{"-s3alias", "--ol-s3", ".mrap", "--x-s3", "--table-s3"}
 )
 
-// validateKey reports whether S3 accepts key as an object key, with an
-// error that says which rule it breaks.
 func validateKey(key string) error {
 	if key == "" {
 		return errors.New("s3: empty key")
@@ -38,8 +33,6 @@ func validateKey(key string) error {
 	return nil
 }
 
-// validateBucket reports whether S3 accepts name as a general purpose
-// bucket name, with an error that says which rule it breaks.
 func validateBucket(name string) error {
 	if n := len(name); n < minBucketLength || n > maxBucketLength {
 		return fmt.Errorf("s3: bucket name %q is %d characters, want %d to %d", name, n, minBucketLength, maxBucketLength)

@@ -1,17 +1,19 @@
+# See architecture/standards/go-elemental/principles/release-and-ci.md
+[settings]
+task.run_auto_install = false
+
 [tools]
+"github:standards-lab/claude-plugins" = { version = "0.22.0", version_prefix = "marathon/v" }
 go = "1.27.4"
 golangci-lint = "2.15.0"
 jq = "1.8.2"
 "aqua:google/go-containerregistry" = "0.22.1"
 
-# Space-separated list of module directories, kept in sync with the go.work
-# use-list. "." is the base module; provider sub-modules are added as they
-# are built.
 [env]
 GO_MODULES = ". azureblob s3"
 
 [tasks.check]
-description = "Build, vet, format, fix, tidy, test, and lint every module; writes nothing"
+description = "Build, vet, format, fix, tidy, test, and lint every module, then run lint-context and lint-references; writes nothing"
 run = '''
 set -eu
 export GOWORK=off
@@ -27,10 +29,19 @@ for mod in $GO_MODULES; do
   go test -race ./...
   golangci-lint run ./...
 done
+cd "$MISE_PROJECT_ROOT"
+fail=0
+for lint in lint-context lint-references; do
+  if ! command -v "$lint" >/dev/null; then
+    echo "FAIL: $lint is not on PATH; run mise install" >&2
+    fail=1
+  elif ! "$lint"; then
+    fail=1
+  fi
+done
+exit "$fail"
 '''
 
-# The acceptance harness: compose.yml's services, one per provider whose
-# acceptance tests need a real server, each keeping its data in memory.
 [tasks.up]
 description = "Start every harness service and wait until each is healthy"
 run = "docker compose up -d --wait --build"
@@ -39,11 +50,8 @@ run = "docker compose up -d --wait --build"
 description = "Stop the harness, discarding its data"
 run = "docker compose down"
 
-# Each acceptance task starts its provider's service, runs that module's tests
-# with the endpoint set, so the acceptance tests run rather than skip, and
-# stops the service whether they pass or fail, printing its log on failure.
 [tasks."acceptance:s3"]
-description = "Run the s3 module's tests, acceptance included, against a fresh SeaweedFS"
+description = "Start a fresh SeaweedFS, run the s3 module's tests with S3_TEST_ENDPOINT set so acceptance runs, and stop it whether they pass or fail, printing its log on failure"
 env = { GOWORK = "off" }
 run = '''
 set -e
@@ -53,7 +61,7 @@ docker compose up -d --wait --build seaweedfs
 '''
 
 [tasks."acceptance:azureblob"]
-description = "Run the azureblob module's tests, acceptance included, against a fresh Azurite"
+description = "Start a fresh Azurite, run the azureblob module's tests with AZUREBLOB_TEST_ENDPOINT set so acceptance runs, and stop it whether they pass or fail, printing its log on failure"
 env = { GOWORK = "off" }
 run = '''
 set -e
@@ -62,9 +70,8 @@ docker compose up -d --wait --build azurite
 (cd azureblob && AZUREBLOB_TEST_ENDPOINT="http://127.0.0.1:${AZURITE_BLOB_PORT:-10000}/devstoreaccount1" go test -race -count=1 -v ./...)
 '''
 
-# One provider at a time, every provider even after one fails.
 [tasks.acceptance]
-description = "Run every provider's acceptance tests, each against a fresh harness service"
+description = "Run every provider's acceptance tests one provider at a time, each against a fresh harness service, running every provider even after one fails"
 run = '''
 rc=0
 mise run acceptance:s3 || rc=1
@@ -77,11 +84,10 @@ description = "Report every requirement, Go version, tool, action pin, and image
 run = "scripts/currency.sh"
 
 [tasks.upgrade]
-description = "Upgrade every module's go directive and direct requirements and the local mise tools to their latest, rewriting go.mod and mise.toml"
+description = "Upgrade every module's go directive to the current Go minor, with no toolchain line, and its direct requirements and the local mise tools to their latest, rewriting go.mod and mise.toml"
 run = '''
 set -eu
 export GOWORK=off
-# The go directive follows the current Go minor, with no toolchain line.
 go_minor=$(mise latest go | cut -d. -f1,2)
 for mod in $GO_MODULES; do
   cd "$MISE_PROJECT_ROOT/$mod"
@@ -94,11 +100,8 @@ cd "$MISE_PROJECT_ROOT"
 mise upgrade --bump --local
 '''
 
-# Each module builds with the workspace off, resolving its pins the way a
-# consumer does, so a pin that no longer builds fails here and in CI rather
-# than being masked by go.work.
 [tasks.build]
-description = "Build all modules standalone (GOWORK=off)"
+description = "Build every module in GO_MODULES standalone with GOWORK=off, resolving its pins as a consumer does"
 run = '''
 set -e
 for mod in $GO_MODULES; do

@@ -20,19 +20,12 @@ import (
 	"github.com/standards-lab/go-storage/storagetest"
 )
 
-// A *Store takes part in a lifecycle.Coordinator's startup, shutdown, and
-// readiness as the Value of a graph.Dependency, with no adapter. It is a
-// ReadyStarter, the only kind of value Coordinator.Checks infers a readiness
-// check from.
 var (
 	_ storage.Client         = (*storage.Store)(nil)
 	_ lifecycle.Subsystem    = (*storage.Store)(nil)
 	_ lifecycle.ReadyStarter = (*storage.Store)(nil)
 )
 
-// A Store defined as a graph node is listed among a Coordinator's Checks
-// under the node's name, holding the Store itself, as doc.go promises a
-// composition root.
 func TestStore_CoordinatorChecksItUnderItsNodeName(t *testing.T) {
 	s := storage.New(storagetest.NewFake(storagetest.Options{}), finalizedConfig(t, 0, 0))
 	g := graph.New()
@@ -53,11 +46,8 @@ func TestStore_CoordinatorChecksItUnderItsNodeName(t *testing.T) {
 	}
 }
 
-// testTimeout is the RequestTimeout every finalized test Config carries, so
-// the probe-deadline assertions have a known bound to check against.
 const testTimeout = 5 * time.Second
 
-// finalizedConfig returns a valid finalized Config with the given limits.
 func finalizedConfig(t *testing.T, maxObjectSize int64, listPageSize int) storage.Config {
 	t.Helper()
 	cfg := validConfig()
@@ -70,7 +60,6 @@ func finalizedConfig(t *testing.T, maxObjectSize int64, listPageSize int) storag
 	return cfg
 }
 
-// startedStore wraps f in a Store built with the given limits and starts it.
 func startedStore(t *testing.T, f storage.Client, maxObjectSize int64, listPageSize int) *storage.Store {
 	t.Helper()
 	s := storage.New(f, finalizedConfig(t, maxObjectSize, listPageSize))
@@ -95,8 +84,6 @@ func wantPanic(t *testing.T, want string, fn func()) {
 	fn()
 }
 
-// storeOps lists every readiness-guarded operation on s as a named call, so
-// the not-ready tests run each one the same way.
 func storeOps(s *storage.Store) []struct {
 	name string
 	call func() error
@@ -127,8 +114,6 @@ func storeOps(s *storage.Store) []struct {
 	}
 }
 
-// wantNotReady asserts every guarded operation returns the plain ErrNotReady
-// sentinel and that the fake saw no Put or Probe as a result.
 func wantNotReady(t *testing.T, s *storage.Store, f *storagetest.Fake) {
 	t.Helper()
 	puts, probes := f.Puts(), f.Probes()
@@ -147,8 +132,6 @@ func wantNotReady(t *testing.T, s *storage.Store, f *storagetest.Fake) {
 	}
 }
 
-// wantProbeDeadline asserts the fake's most recent Probe carried a deadline
-// no further out than testTimeout from now and not already spent.
 func wantProbeDeadline(t *testing.T, f *storagetest.Fake) {
 	t.Helper()
 	deadline, bounded := f.LastProbe()
@@ -201,7 +184,6 @@ func TestStore_NotReadyBeforeStart(t *testing.T) {
 	if got := f.Probes(); got != 0 {
 		t.Errorf("probes = %d, want 0", got)
 	}
-	// Capabilities is a static provider fact and needs no readiness.
 	if got := s.Capabilities().MaxKeyLength; got != 17 {
 		t.Errorf("Capabilities().MaxKeyLength = %d before Start, want 17", got)
 	}
@@ -221,8 +203,6 @@ func TestStore_StartEnsuresThenProbesAndReports(t *testing.T) {
 		t.Errorf("probes after Start = %d, want 1", got)
 	}
 	wantProbeDeadline(t, f)
-	// Both calls run under the one context Start builds, so the ensure
-	// carries the probe's deadline exactly.
 	ensureDeadline, bounded := f.LastEnsure()
 	if !bounded {
 		t.Fatal("LastEnsure() reports no deadline, want the one Start built")
@@ -239,8 +219,6 @@ func TestStore_StartCreatesMissingContainer(t *testing.T) {
 	f := storagetest.NewFake(storagetest.Options{NoContainer: true})
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
-	// The fake's Probe fails until the container exists, so a successful
-	// Start with one call of each proves EnsureContainer ran before Probe.
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start against an empty fake: %v", err)
 	}
@@ -274,13 +252,9 @@ func TestStore_StartFailureWrapsSentinelAndCause(t *testing.T) {
 	if !errors.Is(err, storagetest.ErrDown) {
 		t.Errorf("errors.Is(err, storagetest.ErrDown) = false for %v, want the cause to stay matchable", err)
 	}
-	// The fake already classifies its outage under ErrUnavailable, so Start
-	// must not stack a second copy of the sentinel onto the message.
 	if got := strings.Count(err.Error(), storage.ErrUnavailable.Error()); got != 1 {
 		t.Errorf("error %q names ErrUnavailable %d times, want once", err, got)
 	}
-	// The outage fails the ensure, which is the first step, so Start stops
-	// there.
 	if got := f.Ensures(); got != 1 {
 		t.Errorf("ensures after a failed Start = %d, want 1", got)
 	}
@@ -338,7 +312,6 @@ func TestStore_StartProbeFailureAfterEnsure(t *testing.T) {
 			if got := strings.Count(err.Error(), storage.ErrUnavailable.Error()); got != 1 {
 				t.Errorf("error %q names ErrUnavailable %d times, want once", err, got)
 			}
-			// The ensure succeeded; only the probe failed.
 			if got := f.Ensures(); got != 1 {
 				t.Errorf("ensures = %d, want 1", got)
 			}
@@ -350,8 +323,6 @@ func TestStore_StartProbeFailureAfterEnsure(t *testing.T) {
 	}
 }
 
-// probeErrClient is a fake whose Probe fails with the configured error, so
-// the Start wrap path can be exercised after a successful ensure.
 type probeErrClient struct {
 	*storagetest.Fake
 	err error
@@ -359,8 +330,6 @@ type probeErrClient struct {
 
 func (c *probeErrClient) Probe(context.Context) error { return c.err }
 
-// ensureErrClient is a fake whose EnsureContainer fails with the configured
-// error, which is not classified under ErrUnavailable.
 type ensureErrClient struct {
 	*storagetest.Fake
 	err error
@@ -373,8 +342,6 @@ func TestStore_EnsureContainerNeedsNoReadiness(t *testing.T) {
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 	ctx := context.Background()
 
-	// Before Start: the call reaches the provider under the caller's own
-	// context and leaves the store not started.
 	if err := s.EnsureContainer(ctx); err != nil {
 		t.Fatalf("EnsureContainer before Start: %v", err)
 	}
@@ -396,8 +363,6 @@ func TestStore_EnsureContainerNeedsNoReadiness(t *testing.T) {
 		t.Errorf("ensures after Start = %d, want 2", got)
 	}
 
-	// While not ready: the container disappears, Ready reports it without
-	// creating anything, and EnsureContainer recovers it.
 	f.DropContainer()
 	if s.Ready() {
 		t.Error("Ready() = true with the container gone, want false")
@@ -415,7 +380,6 @@ func TestStore_EnsureContainerNeedsNoReadiness(t *testing.T) {
 		t.Error("Ready() = false after EnsureContainer recovered the container, want true")
 	}
 
-	// After Shutdown.
 	if err := s.Shutdown(ctx); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
@@ -433,8 +397,6 @@ func TestStore_EnsureContainerReturnsProviderError(t *testing.T) {
 	f := &ensureErrClient{Fake: storagetest.NewFake(storagetest.Options{}), err: cause}
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
-	// The provider's error passes through as is, with nothing wrapped
-	// around it.
 	if err := s.EnsureContainer(context.Background()); err != cause {
 		t.Errorf("EnsureContainer = %v, want the provider's error unchanged", err)
 	}
@@ -473,7 +435,6 @@ func TestStore_ReadySelfHeals(t *testing.T) {
 		t.Error("Ready() = false after the outage cleared, want true")
 	}
 	wantProbeDeadline(t, f)
-	// Start probed once; each Ready call is a live probe of its own.
 	if got := f.Probes(); got != 3 {
 		t.Errorf("probes = %d, want 3 (Start and two Ready calls)", got)
 	}
@@ -550,7 +511,6 @@ func TestStore_StartAfterShutdownIsNotReady(t *testing.T) {
 	if err := s.Start(context.Background()); !errors.Is(err, storage.ErrNotReady) {
 		t.Errorf("Start after Shutdown = %v, want ErrNotReady", err)
 	}
-	// The closed client is never called again.
 	if c.Ensures() != ensures || c.Probes() != probes {
 		t.Errorf("Start after Shutdown reached the client: ensures %d->%d, probes %d->%d", ensures, c.Ensures(), probes, c.Probes())
 	}
@@ -582,7 +542,6 @@ func TestStore_ShutdownDuringStartProbe(t *testing.T) {
 }
 
 func TestStore_ShutdownDuringStartProbeThatFails(t *testing.T) {
-	// A closed transport fails the probe that Shutdown outlived.
 	closed := errors.New("transport closed")
 	f := &blockingProbeClient{Fake: storagetest.NewFake(storagetest.Options{}), entered: make(chan struct{}), release: make(chan struct{}), err: closed}
 	s := storage.New(f, finalizedConfig(t, 0, 0))
@@ -626,9 +585,6 @@ func TestStore_ShutdownDuringStartEnsure(t *testing.T) {
 	wantNotReady(t, s, f.Fake)
 }
 
-// blockingProbeClient is a fake whose Probe signals entered and then waits
-// for release, so a test can act while Start is probing. A non-nil err is
-// what the probe then returns in place of the fake's result.
 type blockingProbeClient struct {
 	*storagetest.Fake
 	entered chan struct{}
@@ -645,9 +601,6 @@ func (c *blockingProbeClient) Probe(ctx context.Context) error {
 	return c.Fake.Probe(ctx)
 }
 
-// blockingEnsureClient is a fake whose EnsureContainer signals entered and
-// then waits for release, so a test can act while Start checks the
-// container.
 type blockingEnsureClient struct {
 	*storagetest.Fake
 	entered chan struct{}
@@ -679,8 +632,6 @@ func TestStore_StartReturnsCallerCancellation(t *testing.T) {
 }
 
 func TestStore_StartCallerDeadlineOutranksProviderClassification(t *testing.T) {
-	// The provider reports the caller's expired deadline as an outage of its
-	// own, an error that does not match context.DeadlineExceeded.
 	f := &failingEnsureClient{Fake: storagetest.NewFake(storagetest.Options{}), err: fmt.Errorf("%w: request timed out", storage.ErrUnavailable)}
 	s := storage.New(f, finalizedConfig(t, 0, 0))
 
@@ -698,7 +649,6 @@ func TestStore_StartCallerDeadlineOutranksProviderClassification(t *testing.T) {
 	}
 }
 
-// failingEnsureClient is a fake whose EnsureContainer returns err.
 type failingEnsureClient struct {
 	*storagetest.Fake
 	err error
@@ -708,8 +658,6 @@ func (c *failingEnsureClient) EnsureContainer(context.Context) error {
 	return c.err
 }
 
-// ctxEnsureClient is a fake whose EnsureContainer fails with its context's
-// error, as a provider's request does once the context is done.
 type ctxEnsureClient struct {
 	*storagetest.Fake
 }
@@ -808,16 +756,10 @@ func TestStore_PutBound(t *testing.T) {
 		body         string
 		size         int64
 		wantTooLarge bool
-		// wantMismatch expects the size check to reject the body.
 		wantMismatch bool
-		// wantPuts is the number of Put calls the fake should have seen.
-		wantPuts int64
-		// wantConsumed is the fake's consumed byte count when a Put reached
-		// it; -1 skips the check.
+		wantPuts     int64
 		wantConsumed int64
-		// wantStored is the content Stat and Get should find afterward;
-		// empty means the key must be absent.
-		wantStored string
+		wantStored   string
 	}{
 		{
 			name:         "unbounded accepts a large body",
@@ -896,8 +838,6 @@ func TestStore_PutBound(t *testing.T) {
 					t.Errorf("error %q does not name the bound %d", err, bound)
 				}
 			case tc.wantMismatch:
-				// The size check trips before the bound can, so the body is
-				// rejected as disagreeing with its declared size.
 				if err == nil || errors.Is(err, storage.ErrTooLarge) {
 					t.Errorf("Put = %v, want a size mismatch that is not ErrTooLarge", err)
 				}
@@ -942,9 +882,6 @@ func TestStore_PutBound(t *testing.T) {
 }
 
 func TestStore_PutBoundReaderShapes(t *testing.T) {
-	// The bound must hold whatever shape the body's reads take: a reader
-	// that delivers its final bytes together with io.EOF, and one that
-	// delivers a single byte per Read.
 	const bound = 8
 	shapes := []struct {
 		name string
@@ -991,9 +928,6 @@ func TestStore_PutBoundKeepsClientCause(t *testing.T) {
 	if !errors.Is(err, storage.ErrTooLarge) {
 		t.Fatalf("Put = %v, want ErrTooLarge", err)
 	}
-	// The fake wraps the body's read error with its own prefix, and Put
-	// wraps that under the sentinel, so the provider's message survives and
-	// the bound appears once.
 	want := "storage object too large: fake put: body exceeds the configured max object size (4 bytes)"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err, want)
@@ -1001,9 +935,6 @@ func TestStore_PutBoundKeepsClientCause(t *testing.T) {
 }
 
 func TestStore_PutBoundNamesBoundWhenClientErrorOmitsIt(t *testing.T) {
-	// A client that swallows the read error and then fails for another
-	// reason still yields an error that names the bound and keeps the
-	// client's cause matchable.
 	cause := errors.New("provider closed the connection")
 	f := &lenientPutClient{Fake: storagetest.NewFake(storagetest.Options{}), err: cause}
 	s := startedStore(t, f, 4, 0)
@@ -1043,8 +974,6 @@ func TestStore_PutBoundDoesNotReclassifyClientFailure(t *testing.T) {
 }
 
 func TestStore_PutBoundTripsEvenWhenClientSucceeds(t *testing.T) {
-	// A client that swallows the read error and reports success has stored a
-	// truncated object; the Store must still fail the Put.
 	f := &lenientPutClient{Fake: storagetest.NewFake(storagetest.Options{})}
 	s := startedStore(t, f, 4, 0)
 
@@ -1057,9 +986,6 @@ func TestStore_PutBoundTripsEvenWhenClientSucceeds(t *testing.T) {
 	}
 }
 
-// lenientPutClient is a fake whose Put reads what it can and ignores a read
-// error and the declared Size. It then reports success for whatever it got,
-// or err when one is set.
 type lenientPutClient struct {
 	*storagetest.Fake
 	err error
@@ -1078,14 +1004,11 @@ func (c *lenientPutClient) Put(ctx context.Context, key string, body io.Reader, 
 func TestStore_PutDeclaredSize(t *testing.T) {
 	body := "0123456789"
 	tests := []struct {
-		name    string
-		maxSize int64
-		size    int64
-		// wantShort expects the error to wrap io.ErrUnexpectedEOF.
+		name      string
+		maxSize   int64
+		size      int64
 		wantShort bool
-		// wantLong expects the error to report a body past its declared
-		// size, after at most size bytes were consumed.
-		wantLong bool
+		wantLong  bool
 	}{
 		{"exact size with no bound", 0, 10, false, false},
 		{"exact size within the bound", 64, 10, false, false},
@@ -1147,8 +1070,6 @@ func TestStore_PutDeclaredSize(t *testing.T) {
 }
 
 func TestStore_PutDeclaredSizeReaderShapes(t *testing.T) {
-	// The size check must hold whatever shape the body's reads take, as the
-	// bound must.
 	const size = 8
 	shapes := []struct {
 		name string
@@ -1195,8 +1116,6 @@ func TestStore_PutDeclaredSizeReaderShapes(t *testing.T) {
 }
 
 func TestStore_PutDeclaredSizeTripsEvenWhenClientSucceeds(t *testing.T) {
-	// A client that swallows the read error and reports success has stored
-	// a body other than the declared one; the Store must still fail the Put.
 	f := &lenientPutClient{Fake: storagetest.NewFake(storagetest.Options{})}
 	s := startedStore(t, f, 0, 0)
 	ctx := context.Background()
@@ -1215,9 +1134,6 @@ func TestStore_PutDeclaredSizeTripsEvenWhenClientSucceeds(t *testing.T) {
 }
 
 func TestStore_PutDeclaredSizeKeepsClientCause(t *testing.T) {
-	// A client that fails for a reason of its own after the size check
-	// tripped yields an error that names the declared size and keeps the
-	// client's cause matchable.
 	cause := errors.New("provider closed the connection")
 	f := &lenientPutClient{Fake: storagetest.NewFake(storagetest.Options{}), err: cause}
 	s := startedStore(t, f, 0, 0)
@@ -1333,8 +1249,6 @@ func TestStore_ListRejectsNegativeLimit(t *testing.T) {
 	f := storagetest.NewFake(storagetest.Options{})
 	s := startedStore(t, f, 0, 25)
 
-	// A first valid call leaves a marker, so a rejected call is provably one
-	// the fake never saw.
 	if _, err := s.List(context.Background(), storage.ListOptions{Prefix: "marker"}); err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -1390,8 +1304,6 @@ func TestStore_ConcurrentUse(t *testing.T) {
 			key := fmt.Sprintf("worker-%d", w)
 			for i := range rounds {
 				content := fmt.Sprintf("%d:%d", w, i)
-				// Shutdown races these calls, so ErrNotReady is an accepted
-				// outcome; any other error is a failure.
 				_, err := s.Put(ctx, key, strings.NewReader(content), storage.PutOptions{})
 				if err != nil && !errors.Is(err, storage.ErrNotReady) {
 					t.Errorf("Put(%s): %v", key, err)
@@ -1421,8 +1333,6 @@ func TestStore_ConcurrentUse(t *testing.T) {
 	}
 }
 
-// closingFake is a Fake that also implements io.Closer, for the Shutdown path
-// that closes a Client when it can.
 type closingFake struct {
 	*storagetest.Fake
 
@@ -1439,7 +1349,6 @@ func (c *closingFake) Close() error {
 	return c.closeErr
 }
 
-// putString stores content at key and fails the test on error.
 func putString(t *testing.T, c storage.Client, key, content string) storage.Object {
 	t.Helper()
 	obj, err := c.Put(context.Background(), key, strings.NewReader(content), storage.PutOptions{})
@@ -1449,7 +1358,6 @@ func putString(t *testing.T, c storage.Client, key, content string) storage.Obje
 	return obj
 }
 
-// readBlob drains and closes a Get result.
 func readBlob(t *testing.T, blob storage.Blob) string {
 	t.Helper()
 	data, err := io.ReadAll(blob.Body)
@@ -1462,8 +1370,6 @@ func readBlob(t *testing.T, blob storage.Blob) string {
 	return string(data)
 }
 
-// listKeys walks a listing to its final page and returns every key seen, in
-// order, along with the number of pages it took.
 func listKeys(t *testing.T, c storage.Client, prefix string, limit int) ([]string, int) {
 	t.Helper()
 	var keys []string

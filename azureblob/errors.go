@@ -12,8 +12,6 @@ import (
 	"github.com/standards-lab/go-storage"
 )
 
-// classify maps an SDK error into the storage sentinels as the package
-// documentation lists; nil and an already classified error pass through.
 func classify(err error) error {
 	if err == nil {
 		return nil
@@ -43,10 +41,6 @@ func classify(err error) error {
 	return err
 }
 
-// classifyRead classifies a Get body's read failure. A blob replaced
-// before a resumption fails the resumed request's ETag condition, which
-// is storage.ErrNotFound because the version being read no longer exists.
-// classify handles every other failure.
 func classifyRead(err error) error {
 	if bloberror.HasCode(err, bloberror.ConditionNotMet) {
 		return fmt.Errorf("%w: the blob changed during the read: %w", storage.ErrNotFound, err)

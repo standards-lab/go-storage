@@ -37,9 +37,6 @@ func TestNew_RequiresContainerAccountAndKey(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Finalize first, since Finalize itself rejects an empty
-			// container; the field is cleared afterwards so New's own check
-			// is what fails.
 			cfg := testConfig(t, "http://127.0.0.1:8333", nil)
 			tc.strip(&cfg)
 			_, err := s3.New(cfg)
@@ -122,8 +119,6 @@ func TestNew_RejectsBadMaxRetries(t *testing.T) {
 	}
 }
 
-// part_size takes a whole byte count within S3's part bounds, 5 MiB to
-// 5 GiB.
 func TestNew_RejectsBadPartSize(t *testing.T) {
 	for _, v := range []string{"x", "", "-1", "5242879", "5368709121", "8MiB"} {
 		t.Run(v, func(t *testing.T) {
@@ -143,7 +138,6 @@ func TestNew_AcceptsPartSizeBounds(t *testing.T) {
 	}
 }
 
-// concurrency takes an integer from 1 to 32.
 func TestNew_RejectsBadConcurrency(t *testing.T) {
 	for _, v := range []string{"0", "33", "-1", "x", "", "1.5", "4 "} {
 		t.Run(v, func(t *testing.T) {
@@ -183,7 +177,6 @@ func TestNew_PanicsOnUnfinalizedConfig(t *testing.T) {
 	_, _ = s3.New(storage.Config{Container: testBucket, Account: testAccount, Key: testKey})
 }
 
-// New performs no I/O: the service it is aimed at sees no request.
 func TestNew_PerformsNoIO(t *testing.T) {
 	svc := newService(t, status(http.StatusOK))
 	newClient(t, testConfig(t, svc.endpoint(), nil))
@@ -192,8 +185,6 @@ func TestNew_PerformsNoIO(t *testing.T) {
 	}
 }
 
-// A set Endpoint is the base endpoint, addressed path-style, and requests
-// are signed with the access key for the default region.
 func TestProbe_PathStyleSignedForDefaultRegion(t *testing.T) {
 	svc := newService(t, status(http.StatusOK))
 	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"ignored": "x"}))
@@ -255,8 +246,6 @@ func TestProbe_ServerError(t *testing.T) {
 			if !ok || respErr.HTTPStatusCode() != code {
 				t.Fatalf("Probe = %v, want the SDK's ResponseError with status %d", err, code)
 			}
-			// max_retries=0 means one try: the scripted 5xx is retryable to
-			// the SDK, and the option is what stopped it.
 			if n := len(svc.Requests()); n != 1 {
 				t.Errorf("service saw %d requests, want 1 with max_retries=0", n)
 			}
@@ -284,7 +273,6 @@ func TestProbe_ConnectionRefused(t *testing.T) {
 	if !errors.Is(err, storage.ErrUnavailable) {
 		t.Fatalf("Probe against a closed port = %v, want ErrUnavailable", err)
 	}
-	// The SDK wraps a send failure in a ResponseError with no response.
 	if respErr, ok := errors.AsType[*smithyhttp.ResponseError](err); ok && respErr.HTTPStatusCode() != 0 {
 		t.Fatalf("Probe against a closed port = %v, want no HTTP status in the chain", err)
 	}
@@ -352,7 +340,6 @@ func TestEnsureContainer_Created(t *testing.T) {
 	if len(reqs) != 1 || reqs[0].Method != http.MethodPut || reqs[0].Path != "/"+testBucket {
 		t.Fatalf("service saw %+v, want one PUT /%s", reqs, testBucket)
 	}
-	// us-east-1 takes no location constraint.
 	if len(reqs[0].Body) != 0 {
 		t.Errorf("CreateBucket body = %q, want none in us-east-1", reqs[0].Body)
 	}
@@ -382,7 +369,6 @@ func TestEnsureContainer_AlreadyOwnedByYou(t *testing.T) {
 	}
 }
 
-// BucketAlreadyExists is success only when the bucket then answers a probe.
 func TestEnsureContainer_AlreadyExistsAndReachable(t *testing.T) {
 	svc := newService(t, byMethod(map[string]http.HandlerFunc{
 		http.MethodPut:  failWith(http.StatusConflict, "BucketAlreadyExists"),
@@ -458,9 +444,6 @@ func TestEnsureContainer_ConnectionRefused(t *testing.T) {
 	}
 }
 
-// MaxKeyLength declares S3's 1,024-byte limit, and ValidateKey holds keys to
-// exactly that bound. The other rules ValidateKey applies are proved in
-// keys_test.go.
 func TestCapabilities_MaxKeyLengthIsValidateKeysBound(t *testing.T) {
 	caps := newClient(t, testConfig(t, "http://127.0.0.1:8333", nil)).Capabilities()
 
@@ -486,23 +469,14 @@ func TestNew_RejectsBadTryTimeout(t *testing.T) {
 	}
 }
 
-// stall answers nothing until the client gives up on the request.
 func stall(_ http.ResponseWriter, r *http.Request) {
 	<-r.Context().Done()
 }
 
-// testTryTimeout is the try_timeout the deadline tests set: short, so a
-// stalled try fails fast.
 const testTryTimeout = 100 * time.Millisecond
 
-// callerDeadline bounds each deadline test's call, well past what the try
-// deadline allows, so a missing try deadline fails the test rather than
-// hanging it.
 const callerDeadline = 5 * time.Second
 
-// A service that stalls on every try fails the call with ErrUnavailable once
-// max_retries is spent, each try cut off by try_timeout rather than by the
-// caller's deadline.
 func TestTryTimeout_EveryTryStalledIsUnavailable(t *testing.T) {
 	svc := newService(t, stall)
 	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{
@@ -525,15 +499,11 @@ func TestTryTimeout_EveryTryStalledIsUnavailable(t *testing.T) {
 	if n := len(svc.Requests()); n != 2 {
 		t.Errorf("service saw %d requests, want 2 with max_retries=1", n)
 	}
-	// Two tries of testTryTimeout each, the SDK's backoff between them (at
-	// most 2s for the first retry), and slack.
 	if limit := 2*testTryTimeout + 3*time.Second; elapsed > limit {
 		t.Errorf("Probe took %v, want under %v", elapsed, limit)
 	}
 }
 
-// A try cut off by try_timeout is retried: a service that stalls only on
-// the first try and then answers gives a successful call.
 func TestTryTimeout_StalledTryIsRetried(t *testing.T) {
 	var tries atomic.Int32
 	svc := newService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -558,8 +528,6 @@ func TestTryTimeout_StalledTryIsRetried(t *testing.T) {
 	}
 }
 
-// An unset try_timeout puts no deadline on a try: a slow answer still
-// arrives on the first try.
 func TestTryTimeout_UnsetMeansNoDeadline(t *testing.T) {
 	const delay = 3 * testTryTimeout
 	svc := newService(t, func(w http.ResponseWriter, _ *http.Request) {

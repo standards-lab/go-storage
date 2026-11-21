@@ -23,15 +23,10 @@ import (
 	"github.com/standards-lab/go-storage"
 )
 
-// testKeyPath is the request path of the key "k" in the test bucket.
 const testKeyPath = "/" + testBucket + "/k"
 
-// lastModified is the Last-Modified the scripted service reports, in the
-// header's whole-second form.
 var lastModified = time.Date(2026, 10, 7, 12, 30, 45, 0, time.UTC)
 
-// byRoute answers each request with the handler for its method and path,
-// such as "HEAD /unit/k", and with 405 for a route it has none for.
 func byRoute(handlers map[string]http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		h, ok := handlers[r.Method+" "+r.URL.Path]
@@ -43,7 +38,6 @@ func byRoute(handlers map[string]http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// object answers with an object's headers and, on GET, its content.
 func object(etag, contentType, content string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", etag)
@@ -57,8 +51,6 @@ func object(etag, contentType, content string) http.HandlerFunc {
 	}
 }
 
-// stored answers a PutObject with the ETag it stored under and no
-// Last-Modified, as S3 does, and a Date header of date.
 func stored(etag string, date time.Time) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("ETag", etag)
@@ -67,8 +59,6 @@ func stored(etag string, date time.Time) http.HandlerFunc {
 	}
 }
 
-// listing answers a ListObjectsV2 with body as the ListBucketResult's inner
-// XML.
 func listing(body string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/xml")
@@ -76,8 +66,6 @@ func listing(body string) http.HandlerFunc {
 	}
 }
 
-// wantOnly asserts err matches sentinel and none of the other storage
-// sentinels a provider classifies into.
 func wantOnly(t *testing.T, what string, err, sentinel error) {
 	t.Helper()
 	if !errors.Is(err, sentinel) {
@@ -139,9 +127,6 @@ func TestPut_EmptyContentTypeStoresOctetStream(t *testing.T) {
 	}
 }
 
-// A HeadObject after the PutObject that reports another ETag, because a
-// concurrent writer replaced the object, or that fails, leaves Put a
-// success that reports its own ETag and the PutObject answer's Date.
 func TestPut_ModifiedAtFallsBackToDate(t *testing.T) {
 	date := lastModified.Add(time.Minute)
 	for name, head := range map[string]http.HandlerFunc{
@@ -167,8 +152,6 @@ func TestPut_ModifiedAtFallsBackToDate(t *testing.T) {
 	}
 }
 
-// A body that disagrees with its declared size, or that fails, within the
-// first part sends nothing, so nothing is stored.
 func TestPut_BodyFailuresSendNothing(t *testing.T) {
 	broke := errors.New("source broke")
 	cases := []struct {
@@ -207,7 +190,6 @@ func TestPut_BodyFailuresSendNothing(t *testing.T) {
 	}
 }
 
-// A body of exactly one part, at the default 8 MiB, is one PutObject.
 func TestPut_BodyOfOnePartIsOnePutObject(t *testing.T) {
 	svc := newService(t, byRoute(map[string]http.HandlerFunc{
 		"PUT " + testKeyPath:  stored(`"abc"`, lastModified),
@@ -227,15 +209,11 @@ func TestPut_BodyOfOnePartIsOnePutObject(t *testing.T) {
 	}
 }
 
-// The part size the multipart tests configure, S3's 5 MiB minimum, and the
-// upload ID the scripted service hands out.
 const (
 	testPartSize = 5 << 20
 	testUploadID = "upload-1"
 )
 
-// operation names the S3 operation a recorded request is, by its method
-// and query, as the multipart tests need to tell them apart.
 func operation(r recorded) string {
 	q, _ := url.ParseQuery(r.Query)
 	switch {
@@ -255,7 +233,6 @@ func operation(r recorded) string {
 	return r.Method + " " + r.Path
 }
 
-// operations names each recorded request, in order.
 func operations(reqs []recorded) []string {
 	ops := make([]string, len(reqs))
 	for i, r := range reqs {
@@ -264,7 +241,6 @@ func operations(reqs []recorded) []string {
 	return ops
 }
 
-// count returns how many of ops are op.
 func count(ops []string, op string) int {
 	n := 0
 	for _, o := range ops {
@@ -275,12 +251,6 @@ func count(ops []string, op string) int {
 	return n
 }
 
-// multipart scripts a gateway's multipart upload of key k under
-// testUploadID. A nil handler takes the success answer: CreateMultipartUpload
-// hands out the upload ID, UploadPart stores a part, CompleteMultipartUpload
-// answers with etag and a Date of lastModified plus a second, and
-// AbortMultipartUpload answers 204. HeadObject reports the object under
-// etag.
 type multipart struct {
 	etag     string
 	part     http.HandlerFunc
@@ -319,7 +289,6 @@ func (m multipart) handler() http.HandlerFunc {
 	}
 }
 
-// orElse returns h, or def when h is nil.
 func orElse(h, def http.HandlerFunc) http.HandlerFunc {
 	if h != nil {
 		return h
@@ -327,8 +296,6 @@ func orElse(h, def http.HandlerFunc) http.HandlerFunc {
 	return def
 }
 
-// partLengths returns the decoded length of each UploadPart's content, in
-// part order.
 func partLengths(t *testing.T, reqs []recorded) []int64 {
 	t.Helper()
 	var lengths []int64
@@ -349,10 +316,6 @@ func partLengths(t *testing.T, reqs []recorded) []int64 {
 	return lengths
 }
 
-// A body longer than one part, of unknown or declared size, is a multipart
-// upload in parts of the configured size, and Put reports the completed
-// object's ETag in its "<hex>-<parts>" form with the HeadObject's
-// ModifiedAt.
 func TestPut_LongerThanAPartIsAMultipartUpload(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -399,22 +362,14 @@ func TestPut_LongerThanAPartIsAMultipartUpload(t *testing.T) {
 	}
 }
 
-// inFlight counts the UploadPart requests a scripted service is answering at
-// once and keeps the most it has seen.
 type inFlight struct {
 	mu      sync.Mutex
 	now     int
 	most    int
-	reached chan struct{} // closed once now first reaches want
+	reached chan struct{}
 	want    int
 }
 
-// part answers an UploadPart as multipart's default does, after holding it.
-// Each part is held until want parts are in flight together, so the count
-// reaches want if the client allows it, and then a while longer, so a
-// client that allows more than want sends them while these are held. A
-// client that never reaches want has each part released after a timeout,
-// so the test fails rather than hangs.
 func (f *inFlight) part(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.now++
@@ -441,11 +396,6 @@ func (f *inFlight) part(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// The concurrency option bounds the UploadPart requests of one Put in
-// flight at once, and a Put reaches it: unset means 4. The body has more
-// parts than transfermanager's own default of 5 workers, so an option that
-// did not reach transfermanager shows as more parts in flight than it
-// allows.
 func TestPut_ConcurrencyBoundsThePartsInFlight(t *testing.T) {
 	const parts = 7
 	for name, tc := range map[string]struct {
@@ -481,9 +431,6 @@ func TestPut_ConcurrencyBoundsThePartsInFlight(t *testing.T) {
 	}
 }
 
-// A multipart upload that fails, through its body, a size mismatch, a part,
-// or the completion, returns the failure and aborts the upload: once by
-// transfermanager and once more by Put. Nothing is completed.
 func TestPut_MultipartFailuresAbort(t *testing.T) {
 	broke := errors.New("source broke")
 	sevenMiB := func() io.Reader { return bytes.NewReader(make([]byte, 7<<20)) }
@@ -526,9 +473,6 @@ func TestPut_MultipartFailuresAbort(t *testing.T) {
 	}
 }
 
-// wantAborts asserts the service saw aborts AbortMultipartUploads, each for
-// testUploadID, after the upload, and a CompleteMultipartUpload only when
-// completed.
 func wantAborts(t *testing.T, reqs []recorded, aborts int, completed bool) {
 	t.Helper()
 	ops := operations(reqs)
@@ -546,8 +490,6 @@ func wantAborts(t *testing.T, reqs []recorded, aborts int, completed bool) {
 	}
 }
 
-// cancelAfter reads r and cancels the context once n bytes have been read,
-// as a caller that gives up midway through a Put does.
 type cancelAfter struct {
 	r      io.Reader
 	n      int64
@@ -562,9 +504,6 @@ func (c *cancelAfter) Read(p []byte) (int, error) {
 	return k, err
 }
 
-// A caller that cancels midway through a multipart upload gets its
-// cancellation back, unclassified, and the upload is still aborted on a
-// context of its own.
 func TestPut_CancelledMultipartStillAborts(t *testing.T) {
 	svc := newService(t, multipart{etag: `"never"`}.handler())
 	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"part_size": strconv.Itoa(testPartSize)}))
@@ -582,11 +521,6 @@ func TestPut_CancelledMultipartStillAborts(t *testing.T) {
 	wantAborts(t, svc.Requests(), 2, false)
 }
 
-// Every failure of a multipart upload past its body, the caller's
-// cancellation, a failed part, or a failed completion, names the provider
-// as Put's other failures do, with a message that begins "s3:", and keeps
-// its classification: a cancellation maps to no sentinel, and a part or
-// completion failure to the one its status maps to.
 func TestPut_MultipartFailuresArePrefixed(t *testing.T) {
 	sentinels := []error{storage.ErrNotFound, storage.ErrContainerNotFound, storage.ErrTooLarge,
 		storage.ErrNotReady, storage.ErrUnavailable}
@@ -594,7 +528,7 @@ func TestPut_MultipartFailuresArePrefixed(t *testing.T) {
 		name   string
 		m      multipart
 		cancel bool
-		want   error // the error the failure wraps besides the SDK's
+		want   error
 	}{
 		{"caller cancels", multipart{}, true, context.Canceled},
 		{"part fails", multipart{part: failWith(http.StatusServiceUnavailable, "ServiceUnavailable")}, false,
@@ -630,10 +564,6 @@ func TestPut_MultipartFailuresArePrefixed(t *testing.T) {
 	}
 }
 
-// transfermanager drops the error of an abort that fails after a part
-// failed, so Put's own abort is what frees the upload. When that one fails
-// too, Put names it in the error, which keeps the part failure's
-// classification.
 func TestPut_FailedAbortIsRepeated(t *testing.T) {
 	for name, tc := range map[string]struct {
 		abortStatus []int
@@ -675,7 +605,6 @@ func TestPut_FailedAbortIsRepeated(t *testing.T) {
 	}
 }
 
-// errorCode returns the S3 error code err carries, or "".
 func errorCode(err error) string {
 	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
 		return apiErr.ErrorCode()
@@ -683,8 +612,6 @@ func errorCode(err error) string {
 	return ""
 }
 
-// Every object operation checks its key against Capabilities before it
-// sends anything.
 func TestObjectOperations_RejectInvalidKeys(t *testing.T) {
 	for name, key := range map[string]string{
 		"empty":         "",
@@ -749,15 +676,8 @@ func TestStat_ReportsMetadata(t *testing.T) {
 	}
 }
 
-// rfc850 is the obsolete RFC 850 form of an HTTP date, which the SDK
-// accepts after the IMF-fixdate. It parses into a fixed "GMT" zone, or
-// into time.Local under the tests' Europe/London, never into time.UTC.
 const rfc850 = "Monday, 02-Jan-06 15:04:05 GMT"
 
-// Put, from the HeadObject or from the write answer's Date, Get, and Stat
-// report ModifiedAt in time.UTC whichever HTTP date format the gateway
-// sends. Whole Objects compare with ==, so an instant outside time.UTC
-// fails.
 func TestObjectOperations_ModifiedAtIsUTCInEveryDateFormat(t *testing.T) {
 	for name, layout := range map[string]string{"IMF-fixdate": http.TimeFormat, "RFC 850": rfc850} {
 		t.Run(name, func(t *testing.T) {
@@ -812,7 +732,6 @@ func TestObjectOperations_ModifiedAtIsUTCInEveryDateFormat(t *testing.T) {
 				t.Errorf("Stat = %+v, want %+v", stat, want)
 			}
 
-			// A HeadObject that reports another ETag leaves Put the Date.
 			replaced := newService(t, byRoute(map[string]http.HandlerFunc{
 				"PUT " + testKeyPath:  write,
 				"HEAD " + testKeyPath: head(`"other"`),
@@ -829,8 +748,6 @@ func TestObjectOperations_ModifiedAtIsUTCInEveryDateFormat(t *testing.T) {
 	}
 }
 
-// Every operation reports the ETag in HTTP entity-tag form, whether the
-// service sent it quoted, unquoted, or weak.
 func TestETag_EntityTagForm(t *testing.T) {
 	for sent, want := range map[string]string{
 		`"abc"`:   `"abc"`,
@@ -878,8 +795,6 @@ func TestETag_EntityTagForm(t *testing.T) {
 	}
 }
 
-// HeadObject answers a missing key and a missing bucket with the same bare
-// 404; the HeadBucket that follows decides which one Stat reports.
 func TestStat_HeadBucketDisambiguatesA404(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -908,8 +823,6 @@ func TestStat_HeadBucketDisambiguatesA404(t *testing.T) {
 	}
 }
 
-// A HeadObject failure other than a bare 404 is classified on its own,
-// with no HeadBucket after it.
 func TestStat_OtherFailuresSkipTheBucketCheck(t *testing.T) {
 	svc := newService(t, status(http.StatusForbidden))
 	c := newClient(t, testConfig(t, svc.endpoint(), nil))
@@ -923,8 +836,6 @@ func TestStat_OtherFailuresSkipTheBucketCheck(t *testing.T) {
 	}
 }
 
-// objectOperations calls each object operation on key "k", by name, and
-// returns its error.
 func objectOperations() map[string]func(ctx context.Context, c storage.Client) error {
 	return map[string]func(ctx context.Context, c storage.Client) error{
 		"Put": func(ctx context.Context, c storage.Client) error {
@@ -947,10 +858,6 @@ func objectOperations() map[string]func(ctx context.Context, c storage.Client) e
 	}
 }
 
-// Each object operation classifies the service's failure answers. An
-// answer with a body names its S3 error code; Stat's HEAD answer carries
-// none, so Stat classifies a 5xx by its status, and a 404 by the HeadBucket
-// that follows it, which the same scripted answer fails as NoSuchBucket.
 func TestObjectOperations_ClassifyErrors(t *testing.T) {
 	ops := objectOperations()
 	answers := []struct {
@@ -984,9 +891,6 @@ func TestObjectOperations_ClassifyErrors(t *testing.T) {
 	}
 }
 
-// Every object operation against an endpoint nothing listens on fails with
-// storage.ErrUnavailable: no answer arrives, so there is no status or code
-// to classify by. Retries are off, so each fails on its first try.
 func TestObjectOperations_UnreachableEndpointIsUnavailable(t *testing.T) {
 	for op, call := range objectOperations() {
 		t.Run(op, func(t *testing.T) {
@@ -1013,9 +917,6 @@ func TestGet_MissingKey(t *testing.T) {
 	wantOnly(t, "Get", err, storage.ErrNotFound)
 }
 
-// A Get body whose connection drops partway fails its read with
-// storage.ErrUnavailable, as a request that gets no answer does, with the
-// transport's error still matchable.
 func TestGet_BodyReadFailureIsUnavailable(t *testing.T) {
 	svc := newService(t, byRoute(map[string]http.HandlerFunc{
 		"GET " + testKeyPath: func(w http.ResponseWriter, _ *http.Request) {
@@ -1044,9 +945,6 @@ func TestGet_BodyReadFailureIsUnavailable(t *testing.T) {
 	}
 }
 
-// try_timeout bounds the read of a Get body within the try that opened it:
-// a body that stalls after its headers fails the read with
-// storage.ErrUnavailable once the try's deadline passes.
 func TestGet_StalledBodyReadIsCutOffByTryTimeout(t *testing.T) {
 	svc := newService(t, byRoute(map[string]http.HandlerFunc{
 		"GET " + testKeyPath: func(w http.ResponseWriter, r *http.Request) {
@@ -1081,10 +979,6 @@ func TestGet_StalledBodyReadIsCutOffByTryTimeout(t *testing.T) {
 	}
 }
 
-// rangedObject answers a GetObject for content with the ETag "abc", from
-// the offset a Range of the form bytes=<offset>- names, as a 206 with its
-// Content-Range. A read that starts before stallAt sends the bytes up to
-// stallAt and then stalls until the client gives up on it.
 func rangedObject(content string, stallAt int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		from, code := 0, http.StatusOK
@@ -1107,8 +1001,6 @@ func rangedObject(content string, stallAt int) http.HandlerFunc {
 	}
 }
 
-// resumeOnly answers a GetObject with a Range through resume and any other
-// request through first.
 func resumeOnly(first, resume http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Range") != "" {
@@ -1119,9 +1011,6 @@ func resumeOnly(first, resume http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// A body whose try deadline passes mid-read resumes from its offset with a
-// ranged GetObject conditioned on the first answer's ETag, so the read
-// outlasts try_timeout and yields the object's bytes unchanged.
 func TestGet_ResumesABodyPastTheTryTimeout(t *testing.T) {
 	svc := newService(t, rangedObject("helloworld", 5))
 	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": testTryTimeout.String(), "max_retries": "1"}))
@@ -1155,15 +1044,12 @@ func TestGet_ResumesABodyPastTheTryTimeout(t *testing.T) {
 	}
 }
 
-// A body that stalls on every try resumes as many times per read as the
-// SDK retries each request, and then fails the read with
-// storage.ErrUnavailable. With max_retries 0 the body does not resume.
 func TestGet_AStalledBodyFailsOnceItsRetriesAreSpent(t *testing.T) {
 	cases := []struct {
-		maxRetries string // "" leaves the option unset
-		requests   int    // the GetObject and its resumptions
+		maxRetries string
+		requests   int
 	}{
-		{"", 3}, // unset: the SDK's default of three attempts, two retries
+		{"", 3},
 		{"0", 1},
 		{"1", 2},
 		{"2", 3},
@@ -1210,7 +1096,6 @@ func TestGet_AStalledBodyFailsOnceItsRetriesAreSpent(t *testing.T) {
 					t.Errorf("resumption Range = %q, want bytes=5-", got)
 				}
 			}
-			// A later Read repeats the failure rather than resuming again.
 			if _, again := blob.Body.Read(make([]byte, 1)); !errors.Is(again, storage.ErrUnavailable) || len(svc.Requests()) != tc.requests {
 				t.Errorf("Read after the failure = %v after %d requests, want ErrUnavailable and no resumption", again, len(svc.Requests()))
 			}
@@ -1218,9 +1103,6 @@ func TestGet_AStalledBodyFailsOnceItsRetriesAreSpent(t *testing.T) {
 	}
 }
 
-// An object replaced before a resumption fails the resumed GetObject's
-// If-Match with 412, and one deleted answers NoSuchKey; either fails the
-// read with storage.ErrNotFound, since the version being read is gone.
 func TestGet_AnObjectChangedMidReadIsNotFound(t *testing.T) {
 	cases := map[string]http.HandlerFunc{
 		"replaced": failWith(http.StatusPreconditionFailed, "PreconditionFailed"),
@@ -1250,8 +1132,6 @@ func TestGet_AnObjectChangedMidReadIsNotFound(t *testing.T) {
 	}
 }
 
-// A resumption answered from the object's start, by a service that ignored
-// the Range, fails the read rather than repeat bytes already delivered.
 func TestGet_AResumptionThatIgnoresTheRangeFails(t *testing.T) {
 	svc := newService(t, resumeOnly(rangedObject("helloworld", 5), object(`"abc"`, "text/plain", "helloworld")))
 	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": testTryTimeout.String(), "max_retries": "1"}))
@@ -1272,8 +1152,6 @@ func TestGet_AResumptionThatIgnoresTheRangeFails(t *testing.T) {
 	}
 }
 
-// S3 answers a delete of a missing key with 204; a gateway's NoSuchKey is
-// success too.
 func TestDelete_MissingKeySucceeds(t *testing.T) {
 	for name, answer := range map[string]http.HandlerFunc{
 		"204":       status(http.StatusNoContent),
@@ -1294,9 +1172,6 @@ func TestDelete_MissingKeySucceeds(t *testing.T) {
 	}
 }
 
-// List sends the prefix, token, and limit as ListObjectsV2's parameters and
-// returns the continuation token as Next only while the listing is
-// truncated.
 func TestList_PagesWithTheContinuationToken(t *testing.T) {
 	svc := newService(t, listing(`<Prefix>p/</Prefix><KeyCount>2</KeyCount><MaxKeys>2</MaxKeys><IsTruncated>true</IsTruncated><NextContinuationToken>tok-2</NextContinuationToken>`+
 		`<Contents><Key>p/a</Key><ETag>&quot;e1&quot;</ETag><Size>3</Size><LastModified>2026-10-07T12:30:45.250Z</LastModified></Contents>`+
@@ -1332,7 +1207,6 @@ func TestList_PagesWithTheContinuationToken(t *testing.T) {
 }
 
 func TestList_LastPageHasNoNext(t *testing.T) {
-	// A gateway may send a token on the last page; IsTruncated decides.
 	svc := newService(t, listing(`<KeyCount>0</KeyCount><IsTruncated>false</IsTruncated><NextContinuationToken>stale</NextContinuationToken>`))
 	c := newClient(t, testConfig(t, svc.endpoint(), nil))
 

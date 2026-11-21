@@ -19,8 +19,6 @@ import (
 	"github.com/standards-lab/go-storage"
 )
 
-// The Options keys this package reads. See the package documentation for
-// their values.
 const (
 	optionRegion      = "region"
 	optionMaxRetries  = "max_retries"
@@ -29,28 +27,19 @@ const (
 	optionConcurrency = "concurrency"
 )
 
-// The part_size option's default and bounds. S3 refuses a part, the last
-// one excepted, below 5 MiB, and any part above 5 GiB.
 const (
 	defaultPartSize int64 = 8 << 20
 	minPartSize     int64 = 5 << 20
 	maxPartSize     int64 = 5 << 30
 )
 
-// The concurrency option's default and bounds: how many parts of one
-// multipart upload are in flight at once.
 const (
 	defaultConcurrency = 4
 	maxConcurrency     = 32
 )
 
-// abortTimeout bounds the AbortMultipartUpload that follows a failed
-// multipart upload. It runs on a context detached from the caller's, so a
-// cancelled Put still aborts what it started.
 const abortTimeout = 30 * time.Second
 
-// defaultRegion is the region option's default, and the one region whose
-// CreateBucket takes no location constraint.
 const defaultRegion = "us-east-1"
 
 var _ storage.Client = (*Client)(nil)
@@ -58,13 +47,11 @@ var _ storage.Client = (*Client)(nil)
 // Client is the S3 provider: a storage.Client over one bucket, authenticated
 // with a static access key. A Client is safe for concurrent use.
 type Client struct {
-	s3       *awss3.Client
-	uploader *transfermanager.Client
-	bucket   string
-	region   string
-	partSize int64
-	// readRetries is how many times per read a Get's body resumes after a
-	// failed read: as many as the SDK retries each request.
+	s3          *awss3.Client
+	uploader    *transfermanager.Client
+	bucket      string
+	region      string
+	partSize    int64
 	readRetries int
 }
 
@@ -110,22 +97,12 @@ func New(cfg storage.Config) (*Client, error) {
 		return nil, err
 	}
 
-	// awss3.New, unlike config.LoadDefaultConfig, loads no shared config or
-	// credentials file and takes none of these options from the
-	// environment, so the Config sets every option it builds. The SDK does
-	// still read environment variables of its own: request middleware reads
-	// a few that only shape headers such as the user agent.
 	opts := awss3.Options{
 		Region:           region,
 		Credentials:      credentials.NewStaticCredentialsProvider(cfg.Account, cfg.Key, ""),
 		RetryMaxAttempts: attempts,
 	}
 	if tryTimeout > 0 {
-		// The HTTP client's own timeout bounds each try from its send to
-		// the last byte of its answer. A try that runs past it fails with a
-		// timeout the standard retryer treats as a retryable connection
-		// error, and classify maps the last one to storage.ErrUnavailable.
-		// The buildable client keeps the SDK's default transport settings.
 		opts.HTTPClient = awshttp.NewBuildableClient().WithTimeout(tryTimeout)
 	}
 	if cfg.Endpoint != "" {
@@ -136,14 +113,6 @@ func New(cfg storage.Config) (*Client, error) {
 		opts.UsePathStyle = true
 	}
 	client := awss3.New(opts)
-	// The threshold equal to the part size makes transfermanager take any
-	// body of at least one part as a multipart upload; Put sends a smaller
-	// one as a PutObject itself, so it only hands over a body longer than
-	// a part. Concurrency is the number of workers that send parts, so it
-	// bounds the UploadPart requests in flight; transfermanager also keeps
-	// a pool of Concurrency+1 part buffers for them. FailTimeout gives the
-	// abort after a failure a fresh context, so the caller's cancellation
-	// does not cancel the abort too.
 	uploader := transfermanager.New(client, func(o *transfermanager.Options) {
 		o.PartSizeBytes = partSize
 		o.MultipartUploadThreshold = partSize
@@ -160,8 +129,6 @@ func New(cfg storage.Config) (*Client, error) {
 	}, nil
 }
 
-// regionOption reads the region option, applying the default for an unset
-// key.
 func regionOption(options map[string]string) (string, error) {
 	v, ok := options[optionRegion]
 	if !ok {
@@ -173,9 +140,6 @@ func regionOption(options map[string]string) (string, error) {
 	return v, nil
 }
 
-// maxAttempts reads the max_retries option as the SDK's RetryMaxAttempts,
-// which counts the first try. An unset key returns 0, which the SDK reads as
-// "apply the default".
 func maxAttempts(options map[string]string) (int, error) {
 	v, ok := options[optionMaxRetries]
 	if !ok {
@@ -188,10 +152,6 @@ func maxAttempts(options map[string]string) (int, error) {
 	return n + 1, nil
 }
 
-// readRetries returns how many retries the SDK's retryer allows a request
-// of the given RetryMaxAttempts: the standard retryer's default attempts
-// less the first when attempts is 0 (unset), and attempts less the first
-// otherwise.
 func readRetries(attempts int) int {
 	if attempts == 0 {
 		attempts = retry.DefaultMaxAttempts
@@ -199,9 +159,6 @@ func readRetries(attempts int) int {
 	return attempts - 1
 }
 
-// partSizeOption reads the part_size option as a whole number of bytes
-// within the bounds S3 sets on a part, applying the default for an unset
-// key.
 func partSizeOption(options map[string]string) (int64, error) {
 	v, ok := options[optionPartSize]
 	if !ok {
@@ -214,8 +171,6 @@ func partSizeOption(options map[string]string) (int64, error) {
 	return n, nil
 }
 
-// tryTimeoutOption reads the try_timeout option as a positive duration. An
-// unset key returns 0, which New reads as "no deadline on a try".
 func tryTimeoutOption(options map[string]string) (time.Duration, error) {
 	v, ok := options[optionTryTimeout]
 	if !ok {
@@ -228,8 +183,6 @@ func tryTimeoutOption(options map[string]string) (time.Duration, error) {
 	return d, nil
 }
 
-// concurrencyOption reads the concurrency option as an integer from 1 to
-// maxConcurrency, applying the default for an unset key.
 func concurrencyOption(options map[string]string) (int, error) {
 	v, ok := options[optionConcurrency]
 	if !ok {
@@ -242,8 +195,6 @@ func concurrencyOption(options map[string]string) (int, error) {
 	return n, nil
 }
 
-// validateEndpoint reports whether endpoint is an absolute http or https
-// URL, so a typo fails at construction rather than on the first request.
 func validateEndpoint(endpoint string) error {
 	u, err := url.Parse(endpoint)
 	if err != nil {

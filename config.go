@@ -12,10 +12,8 @@ import (
 	"github.com/standards-lab/go-core/config"
 )
 
-// defaultRequestTimeout is RequestTimeout's default.
 const defaultRequestTimeout = 10 * time.Second
 
-// defaultReadIdleTimeout is ReadIdleTimeout's default.
 const defaultReadIdleTimeout = 30 * time.Second
 
 // Config holds the identity, credential, and limits of one object storage
@@ -58,18 +56,17 @@ type Config struct {
 
 	// ReadIdleTimeout bounds each read of a Get's body: a read that
 	// returns nothing within it fails with [ErrUnavailable], and the Get's
-	// request is cancelled, so a stalled store is cut off. The clock runs
-	// only while a read is in progress, so a caller that reads slowly, such
-	// as a download to a slow client, is never cut off, however long the
-	// whole transfer takes. It defaults to 30 seconds. A provider's
-	// per-try deadline within a read, such as azureblob's try_timeout, is
-	// sized below it.
+	// request is cancelled, so a stalled store is cut off. That failure
+	// keeps its cause as text only, so it never matches the caller's own
+	// context's cancellation. The clock runs only while a read is in
+	// progress, so a caller that reads slowly, such as a download to a slow
+	// client, is never cut off, however long the whole transfer takes. It
+	// defaults to 30 seconds. A provider's per-try deadline within a read,
+	// such as azureblob's try_timeout, is sized below it.
 	ReadIdleTimeout *config.Duration `json:"read_idle_timeout"`
 
 	Env Env `json:"-"`
 
-	// finalized records that the last Finalize succeeded; Config is copied
-	// by value, so a finalized copy stays finalized.
 	finalized bool
 }
 
@@ -174,10 +171,6 @@ func (c *Config) applyEnv() error {
 	return config.SetDurationFromEnv(&c.ReadIdleTimeout, c.Env.ReadIdleTimeout)
 }
 
-// applyOptionsEnv sets provider options from the variables under the
-// Env.Options prefix, as [Env] describes. It ignores an empty value and a
-// name whose suffix is not a valid option key, and it copies the map before
-// the first write.
 func (c *Config) applyOptionsEnv() {
 	if c.Env.Options == "" {
 		return
@@ -204,8 +197,6 @@ func (c *Config) applyOptionsEnv() {
 	}
 }
 
-// optionKey reports whether key is a valid option-variable suffix: non-empty
-// and made only of A–Z, 0–9, and underscores.
 func optionKey(key string) bool {
 	if key == "" {
 		return false
@@ -225,8 +216,6 @@ func (c *Config) Finalized() bool {
 	return c.finalized
 }
 
-// validate checks the finalized values. Every error has the form
-// "storage: <field> <problem>".
 func (c *Config) validate() error {
 	if c.Container == "" {
 		return errors.New("storage: container is required")

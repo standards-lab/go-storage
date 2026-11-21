@@ -4,7 +4,10 @@ The claims below rest on documentation or on an emulator, not on the live servic
 the service that contradicts one invalidates the text that states it.
 
 `azureblob` passes the conformance suite against Azurite, started with `--skipApiVersionCheck`
-and `--loose` (`compose/azurite/Dockerfile`), and no live Azure account has run it:
+and `--loose` (`compose/azurite/Dockerfile`), and no live Azure account has run it. The Azure SDK
+sends an `x-ms-version` that Azurite rejects unless its version check is off, and `--loose` ignores
+the headers Azurite doesn't support. The image defines no health check and has no curl, so the
+harness checks readiness with busybox `nc` on the blob port:
 
 - **`ValidateKey`'s rules and the container-name rules `New` applies.** They come from Azure's
   documentation. Azurite accepts every key that breaks them, so only unit tests cover them.
@@ -14,7 +17,7 @@ and `--loose` (`compose/azurite/Dockerfile`), and no live Azure account has run 
   Azurite's is the last key of the page, and Azure's is documented as an opaque token.
 
 Four claims the standard tier rests on concern S3. `s3` passes the conformance suite against
-SeaweedFS 4.53's S3 gateway, the image `compose/seaweedfs/Dockerfile` pins, started with
+SeaweedFS 4.54's S3 gateway, the image `compose/seaweedfs/Dockerfile` pins, started with
 `-s3.autoCreateBucket=false`, and each claim has a test against it; no live AWS account has run
 them:
 
@@ -53,14 +56,16 @@ them:
 
 SeaweedFS differs from AWS where the tests had to accommodate it or where the adapter relies on
 neither behavior. Each SeaweedFS side was observed against 4.48, in the s3 spike or the acceptance
-tests, and the acceptance tests pass against 4.53; each AWS side is from AWS's documentation and
+tests, and the acceptance tests pass against 4.54; each AWS side is from AWS's documentation and
 untested:
 
 - **A write to a missing bucket.** SeaweedFS creates the bucket on an admin's upload unless
   `-s3.autoCreateBucket=false`; AWS answers `NoSuchBucket`. With the default on, the
   missing-container checks cannot pass, so the harness turns it off.
 - **Readiness.** SeaweedFS's gateway answers unsigned requests before it has loaded its admin
-  credential, so the harness waits for a signed listing.
+  credential, so the harness waits for a listing signed with that credential: the
+  `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` that SeaweedFS reads at startup and the s3
+  acceptance tests sign with.
 - **The signature region.** SeaweedFS accepts any region in a signature; AWS requires the
   bucket's. `TestProbe_RegionOption` proves the option signs the request, but no run shows a
   wrong region failing.

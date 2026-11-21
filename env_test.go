@@ -6,8 +6,6 @@ import (
 	"github.com/standards-lab/go-storage"
 )
 
-// Every name derives from the prefix through config.EnvName with the
-// "storage" segment; this pins the full set a consumer binds to.
 func TestNewEnv(t *testing.T) {
 	env := storage.NewEnv("app")
 

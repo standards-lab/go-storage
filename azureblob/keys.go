@@ -8,20 +8,16 @@ import (
 	"unicode/utf8"
 )
 
-// The blob-name limits the package documentation lists.
 const (
 	maxKeyLength   = 1024
 	maxKeySegments = 254
 )
 
-// The container-name length limits the package documentation lists.
 const (
 	minContainerLength = 3
 	maxContainerLength = 63
 )
 
-// validateKey reports whether the service accepts key as a blob name, with an
-// error that says which rule it breaks.
 func validateKey(key string) error {
 	if key == "" {
 		return errors.New("azureblob: empty key")
@@ -49,8 +45,6 @@ func validateKey(key string) error {
 	return nil
 }
 
-// validateContainer reports whether the service accepts name as a container
-// name, with an error that says which rule it breaks.
 func validateContainer(name string) error {
 	if n := len(name); n < minContainerLength || n > maxContainerLength {
 		return fmt.Errorf("azureblob: container name %q is %d characters, want %d to %d", name, n, minContainerLength, maxContainerLength)

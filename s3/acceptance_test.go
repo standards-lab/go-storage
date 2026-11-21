@@ -30,14 +30,8 @@ import (
 	"github.com/standards-lab/go-storage/storagetest"
 )
 
-// endpointEnv names the S3 gateway URL the acceptance tests run against, for
-// example http://127.0.0.1:8333 for the SeaweedFS harness. The tests skip
-// when it is unset, so they never run on the unit tier. The gateway must
-// accept the access key testAccount with the secret testKey.
 const endpointEnv = "S3_TEST_ENDPOINT"
 
-// acceptanceEndpoint returns the gateway URL the environment names, and
-// skips the test when it is unset.
 func acceptanceEndpoint(t *testing.T) string {
 	t.Helper()
 	endpoint := os.Getenv(endpointEnv)
@@ -47,10 +41,6 @@ func acceptanceEndpoint(t *testing.T) string {
 	return endpoint
 }
 
-// acceptanceConfig returns a finalized Config aimed at the endpoint the
-// environment names, over a bucket that exists for this test alone: it does
-// not exist when the test starts, and it is emptied and deleted when the
-// test ends. It skips the test when the endpoint is unset.
 func acceptanceConfig(t *testing.T) storage.Config {
 	t.Helper()
 	endpoint := acceptanceEndpoint(t)
@@ -79,8 +69,6 @@ func acceptanceConfig(t *testing.T) storage.Config {
 	return cfg
 }
 
-// rawClient is an SDK client aimed at endpoint the way the provider aims
-// its own, for the setup and inspection the provider's API does not offer.
 func rawClient(endpoint string) *awss3.Client {
 	return awss3.New(awss3.Options{
 		Region:       "us-east-1",
@@ -90,9 +78,6 @@ func rawClient(endpoint string) *awss3.Client {
 	})
 }
 
-// deleteBucket deletes every object version and delete marker in bucket,
-// so a versioned bucket empties too, then deletes the bucket. It ignores
-// every failure, a missing bucket included: it is cleanup.
 func deleteBucket(ctx context.Context, c *awss3.Client, bucket string) {
 	pages := awss3.NewListObjectVersionsPaginator(c, &awss3.ListObjectVersionsInput{Bucket: aws.String(bucket)})
 	for pages.HasMorePages() {
@@ -110,10 +95,6 @@ func deleteBucket(ctx context.Context, c *awss3.Client, bucket string) {
 	_, _ = c.DeleteBucket(ctx, &awss3.DeleteBucketInput{Bucket: aws.String(bucket)})
 }
 
-// TestAcceptance_Conformance runs the conformance suite over the provider
-// against a real gateway. The suite creates the bucket itself. Its 3 MiB
-// bodies fit in one part at the default 8 MiB, so each goes up as one
-// PutObject; the multipart tests below cover the longer path.
 func TestAcceptance_Conformance(t *testing.T) {
 	cfg := acceptanceConfig(t)
 	storagetest.Run(t, func(t *testing.T) storage.Client {
@@ -121,8 +102,6 @@ func TestAcceptance_Conformance(t *testing.T) {
 	})
 }
 
-// TestAcceptance_MissingContainer runs the missing-container check against a
-// real gateway, over a bucket the test names and never creates.
 func TestAcceptance_MissingContainer(t *testing.T) {
 	cfg := acceptanceConfig(t)
 	storagetest.RunMissingContainer(t, func(t *testing.T) storage.Client {
@@ -130,10 +109,6 @@ func TestAcceptance_MissingContainer(t *testing.T) {
 	})
 }
 
-// TestAcceptance_StatMissingBucket proves that Stat over a bucket that does
-// not exist reports storage.ErrContainerNotFound and never
-// storage.ErrNotFound, though the gateway answers its HeadObject with the
-// same bare 404 it gives a missing key in an existing bucket.
 func TestAcceptance_StatMissingBucket(t *testing.T) {
 	cfg := acceptanceConfig(t)
 	client := newClient(t, cfg)
@@ -148,9 +123,6 @@ func TestAcceptance_StatMissingBucket(t *testing.T) {
 	t.Logf("Stat over a missing bucket: %v", err)
 }
 
-// TestAcceptance_StoreStart drives storage.Store over the provider against
-// a gateway without the bucket: the bucket is missing before Start, and
-// Start creates it, probes it, and reports ready.
 func TestAcceptance_StoreStart(t *testing.T) {
 	cfg := acceptanceConfig(t)
 	client := newClient(t, cfg)
@@ -180,9 +152,6 @@ func TestAcceptance_StoreStart(t *testing.T) {
 	}
 }
 
-// TestAcceptance_StoreObjects drives the object operations through
-// storage.Store against the gateway and logs the ETag and ModifiedAt each
-// one reports, so a run records what the gateway answered.
 func TestAcceptance_StoreObjects(t *testing.T) {
 	cfg := acceptanceConfig(t)
 	store := storage.New(newClient(t, cfg), cfg)
@@ -256,9 +225,6 @@ func TestAcceptance_StoreObjects(t *testing.T) {
 	}
 }
 
-// TestAcceptance_StoreStartUnreachable aims the provider at a port nothing
-// listens on: Probe and Store.Start both fail with storage.ErrUnavailable,
-// with the SDK's default retries in play, as a deployment would run.
 func TestAcceptance_StoreStartUnreachable(t *testing.T) {
 	acceptanceEndpoint(t)
 	cfg := storage.Config{
@@ -286,10 +252,6 @@ func TestAcceptance_StoreStartUnreachable(t *testing.T) {
 	}
 }
 
-// TestAcceptance_EnsureContainerExisting runs EnsureContainer over a bucket
-// that already exists, holds an object, and has versioning enabled: it
-// succeeds, twice, and leaves the object, the listing, and the versioning
-// state as they were.
 func TestAcceptance_EnsureContainerExisting(t *testing.T) {
 	cfg := acceptanceConfig(t)
 	raw := rawClient(cfg.Endpoint)
@@ -351,12 +313,8 @@ func TestAcceptance_EnsureContainerExisting(t *testing.T) {
 	}
 }
 
-// acceptancePartSize is the part size the multipart acceptance tests
-// configure, S3's 5 MiB minimum, so a 12 MiB body goes up in three parts.
 const acceptancePartSize = 5 << 20
 
-// multipartClient returns a provider client over cfg's bucket, created,
-// with the part size set to acceptancePartSize.
 func multipartClient(t *testing.T, cfg storage.Config) storage.Client {
 	t.Helper()
 	cfg.Options = map[string]string{"part_size": strconv.Itoa(acceptancePartSize)}
@@ -367,7 +325,6 @@ func multipartClient(t *testing.T, cfg storage.Config) storage.Client {
 	return client
 }
 
-// randomBytes returns n random bytes, so each part's content differs.
 func randomBytes(t *testing.T, n int) []byte {
 	t.Helper()
 	b := make([]byte, n)
@@ -377,8 +334,6 @@ func randomBytes(t *testing.T, n int) []byte {
 	return b
 }
 
-// openUploads returns the multipart uploads the gateway lists as in
-// progress for key, read with a raw ListMultipartUploads.
 func openUploads(t *testing.T, raw *awss3.Client, bucket, key string) []types.MultipartUpload {
 	t.Helper()
 	out, err := raw.ListMultipartUploads(t.Context(), &awss3.ListMultipartUploadsInput{Bucket: aws.String(bucket), Prefix: aws.String(key)})
@@ -394,8 +349,6 @@ func openUploads(t *testing.T, raw *awss3.Client, bucket, key string) []types.Mu
 	return uploads
 }
 
-// wantAbsent asserts key has no object: Stat answers ErrNotFound and List
-// does not name it.
 func wantAbsent(t *testing.T, client storage.Client, key string) {
 	t.Helper()
 	if _, err := client.Stat(t.Context(), key); !errors.Is(err, storage.ErrNotFound) {
@@ -412,9 +365,6 @@ func wantAbsent(t *testing.T, client storage.Client, key string) {
 	}
 }
 
-// pausingBody reads r and pauses once, after its first at bytes: it closes
-// reached and blocks until release closes, so a test can look at the
-// gateway while a multipart upload is in progress.
 type pausingBody struct {
 	r       io.Reader
 	at      int64
@@ -439,12 +389,6 @@ func (b *pausingBody) Read(p []byte) (int, error) {
 	return k, err
 }
 
-// TestAcceptance_MultipartInvisibleUntilComplete puts a 12 MiB body of
-// unknown size at 5 MiB parts. The body pauses at 6 MiB, after Put has
-// decided on a multipart upload, started it, and handed part 1 over: the
-// gateway lists the upload in progress, while Stat answers ErrNotFound and
-// List lacks the key. Released, Put completes with a multipart ETag, which
-// Get, Stat, and List then report with the content.
 func TestAcceptance_MultipartInvisibleUntilComplete(t *testing.T) {
 	cfg := acceptanceConfig(t)
 	client := multipartClient(t, cfg)
@@ -536,12 +480,6 @@ func TestAcceptance_MultipartInvisibleUntilComplete(t *testing.T) {
 	}
 }
 
-// TestAcceptance_MultipartFailureLeavesNothing fails a 12 MiB multipart Put
-// partway in three ways: the body fails, the body ends short of its
-// declared size, and the caller cancels. Each body pauses at 6 MiB, where
-// the gateway must list the upload in progress, so the case proves an
-// upload was open to clean up; released, each Put returns its failure and
-// leaves no object and no open multipart upload for the key.
 func TestAcceptance_MultipartFailureLeavesNothing(t *testing.T) {
 	cfg := acceptanceConfig(t)
 	client := multipartClient(t, cfg)
@@ -610,32 +548,21 @@ func TestAcceptance_MultipartFailureLeavesNothing(t *testing.T) {
 	}
 }
 
-// The try_timeout and pause the resumption tests use: the reader pauses
-// past the deadline of the try that opened the body, so the HTTP client
-// cuts that try mid-stream, and the resumed try has the whole deadline to
-// carry the rest.
 const (
 	resumeTryTimeout = 2 * time.Second
 	resumePause      = 3 * time.Second
 )
 
-// resumeObjectSize is the object the resumption tests read: large enough
-// that the body is still streaming, far from its end, when the reader
-// pauses after its first resumeReadFirst bytes.
 const (
 	resumeObjectSize = 32 << 20
 	resumeReadFirst  = 1 << 20
 )
 
-// rangedGet is one GetObject with a Range that a recordingProxy passed on.
 type rangedGet struct {
 	Range   string
 	IfMatch string
 }
 
-// recordingProxy forwards every request to a gateway unchanged, the Host
-// header included so the signature still verifies, and records each
-// GetObject that carries a Range: the resumptions of a Get body.
 type recordingProxy struct {
 	srv *httptest.Server
 
@@ -643,8 +570,6 @@ type recordingProxy struct {
 	ranged []rangedGet
 }
 
-// newRecordingProxy starts a recordingProxy in front of endpoint and stops
-// it when the test ends.
 func newRecordingProxy(t *testing.T, endpoint string) *recordingProxy {
 	t.Helper()
 	target, err := url.Parse(endpoint)
@@ -668,16 +593,12 @@ func newRecordingProxy(t *testing.T, endpoint string) *recordingProxy {
 	return p
 }
 
-// Ranged returns a copy of the ranged GetObjects the proxy has seen.
 func (p *recordingProxy) Ranged() []rangedGet {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]rangedGet(nil), p.ranged...)
 }
 
-// resumeClients returns a client over cfg's bucket, created, that reaches
-// the gateway directly, and one that reaches it through a recordingProxy
-// with try_timeout set to resumeTryTimeout and max_retries at its default.
 func resumeClients(t *testing.T, cfg storage.Config) (direct, proxied storage.Client, proxy *recordingProxy) {
 	t.Helper()
 	direct = newClient(t, cfg)
@@ -690,8 +611,6 @@ func resumeClients(t *testing.T, cfg storage.Config) (direct, proxied storage.Cl
 	return direct, newClient(t, cfg), proxy
 }
 
-// pausedGet opens key through client, reads its first resumeReadFirst
-// bytes, and returns the Blob with the rest of its body unread.
 func pausedGet(t *testing.T, client storage.Client, key string) (storage.Blob, []byte) {
 	t.Helper()
 	blob, err := client.Get(t.Context(), key, storage.GetOptions{})
@@ -706,10 +625,6 @@ func pausedGet(t *testing.T, client storage.Client, key string) (storage.Blob, [
 	return blob, head
 }
 
-// wantResumedMidStream asserts the proxy saw at least one resumption, each
-// conditioned on etag, and the first from an offset past what the reader
-// took before its pause and short of the object's end, so the try's
-// deadline cut the body mid-stream.
 func wantResumedMidStream(t *testing.T, proxy *recordingProxy, etag string) {
 	t.Helper()
 	ranged := proxy.Ranged()
@@ -731,10 +646,6 @@ func wantResumedMidStream(t *testing.T, proxy *recordingProxy, etag string) {
 	}
 }
 
-// TestAcceptance_GetResumesPastTheTryTimeout reads a 32 MiB object whose
-// reader pauses past try_timeout after its first MiB. The try's deadline
-// cuts the body mid-stream, the body resumes with a ranged GetObject
-// conditioned on the ETag, and the read yields the bytes Put stored.
 func TestAcceptance_GetResumesPastTheTryTimeout(t *testing.T) {
 	cfg := acceptanceConfig(t)
 	direct, client, proxy := resumeClients(t, cfg)
@@ -756,10 +667,6 @@ func TestAcceptance_GetResumesPastTheTryTimeout(t *testing.T) {
 	wantResumedMidStream(t, proxy, blob.ETag)
 }
 
-// TestAcceptance_GetOfAReplacedObjectIsNotFound replaces the object while
-// its Get body is paused after its first MiB. The pause outlasts
-// try_timeout, so the body resumes, and the resumption's If-Match on the
-// first answer's ETag fails: the read fails with storage.ErrNotFound.
 func TestAcceptance_GetOfAReplacedObjectIsNotFound(t *testing.T) {
 	cfg := acceptanceConfig(t)
 	direct, client, proxy := resumeClients(t, cfg)

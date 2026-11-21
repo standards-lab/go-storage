@@ -7,17 +7,12 @@ import (
 	"github.com/standards-lab/go-storage/azureblob"
 )
 
-// The blob-name rules the package documentation lists, through the
-// ValidateKey a Client declares. Azurite accepts a key that breaks each
-// rule, so only these cases prove them.
 func TestCapabilities_ValidateKey(t *testing.T) {
 	validateKey := newClient(t, testConfig(t, "http://127.0.0.1:10000/"+testAccount, nil)).Capabilities().ValidateKey
 	if validateKey == nil {
 		t.Fatal("Capabilities().ValidateKey = nil, want the blob-name rules")
 	}
 
-	// A 1,024-rune key of two-byte runes is 2,048 bytes, so a byte count
-	// would reject it.
 	longest := strings.Repeat("é", 1024)
 	mostSegments := strings.Repeat("a/", 253) + "a"
 
@@ -68,8 +63,6 @@ func TestCapabilities_ValidateKey(t *testing.T) {
 	}
 }
 
-// The container-name rules the package documentation lists, which New
-// applies.
 func TestNew_ContainerName(t *testing.T) {
 	for _, name := range []string{"abc", "unit", "acceptance-0123abcd", "a1-b2-c3", strings.Repeat("a", 63)} {
 		t.Run("valid/"+name, func(t *testing.T) {

@@ -14,8 +14,6 @@ import (
 	"github.com/standards-lab/go-storage"
 )
 
-// The Options keys this package reads. See the package documentation for
-// their values.
 const (
 	optionMaxRetries  = "max_retries"
 	optionTryTimeout  = "try_timeout"
@@ -23,13 +21,18 @@ const (
 	optionConcurrency = "concurrency"
 )
 
-// The upload sizing defaults and the range each upload option accepts.
 const (
 	defaultBlockSize   int64 = 4 << 20
 	defaultConcurrency       = 4
 	minBlockSize       int64 = 1 << 20
 	maxBlockSize       int64 = 100 << 20
 	maxConcurrency           = 32
+)
+
+// See docs/design.md
+const (
+	sdkDefaultRetries int32 = 3
+	sdkNoRetries      int32 = -1
 )
 
 var _ storage.Client = (*Client)(nil)
@@ -41,8 +44,6 @@ type Client struct {
 	container   *container.Client
 	blockSize   int64
 	concurrency int
-	// readRetries is how many times per read a Get's body resumes after a
-	// failed read: the retry count the SDK's policy applies to each request.
 	readRetries int32
 }
 
@@ -93,8 +94,6 @@ func New(cfg storage.Config) (*Client, error) {
 	return &Client{container: cc, blockSize: blockSize, concurrency: concurrency, readRetries: readRetries(opts.Retry.MaxRetries)}, nil
 }
 
-// uploadOptions reads the block_size and concurrency options, applying the
-// defaults for an unset key.
 func uploadOptions(options map[string]string) (blockSize int64, concurrency int, err error) {
 	blockSize, concurrency = defaultBlockSize, defaultConcurrency
 	if v, ok := options[optionBlockSize]; ok {
@@ -114,21 +113,16 @@ func uploadOptions(options map[string]string) (blockSize int64, concurrency int,
 	return blockSize, concurrency, nil
 }
 
-// readRetries returns the retry count the SDK's policy applies for the
-// configured MaxRetries: the policy's default of 3 when MaxRetries is
-// unset (zero), none when it is negative, and MaxRetries otherwise.
 func readRetries(maxRetries int32) int32 {
 	switch {
 	case maxRetries == 0:
-		return 3
+		return sdkDefaultRetries
 	case maxRetries < 0:
 		return 0
 	}
 	return maxRetries
 }
 
-// clientOptions reads the max_retries and try_timeout options into the SDK's
-// retry policy. A key it does not know is ignored.
 func clientOptions(options map[string]string) (*container.ClientOptions, error) {
 	opts := &container.ClientOptions{}
 	if v, ok := options[optionMaxRetries]; ok {
@@ -138,9 +132,7 @@ func clientOptions(options map[string]string) (*container.ClientOptions, error) 
 		}
 		opts.Retry.MaxRetries = int32(n)
 		if n == 0 {
-			// The SDK reads a zero MaxRetries as "apply the default" and a
-			// negative one as "one try, no retries".
-			opts.Retry.MaxRetries = -1
+			opts.Retry.MaxRetries = sdkNoRetries
 		}
 	}
 	if v, ok := options[optionTryTimeout]; ok {

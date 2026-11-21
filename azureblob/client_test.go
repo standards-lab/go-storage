@@ -43,9 +43,6 @@ func TestNew_RequiresContainerAccountAndKey(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Finalize first, since Finalize itself rejects an empty
-			// container; the field is cleared afterwards so New's own check
-			// is what fails.
 			cfg := testConfig(t, tc.endpoint, nil)
 			tc.strip(&cfg)
 			_, err := azureblob.New(cfg)
@@ -88,7 +85,6 @@ func TestNew_RejectsBadKey(t *testing.T) {
 	}
 }
 
-// A key the package does not list is ignored: the client it builds works.
 func TestNew_IgnoresUnknownOptions(t *testing.T) {
 	svc := newService(t, status(http.StatusOK))
 	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"region": "us-east-1"}))
@@ -189,8 +185,6 @@ func TestEnsureContainer_ServerError(t *testing.T) {
 	if !errors.As(err, &respErr) || respErr.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("EnsureContainer = %v, want the SDK's ResponseError matchable with status 500", err)
 	}
-	// max_retries=0 means one try: the scripted 500 is retryable to the SDK,
-	// and the option is what stopped it.
 	if n := len(svc.Requests()); n != 1 {
 		t.Errorf("service saw %d requests, want 1 with max_retries=0", n)
 	}
@@ -226,8 +220,6 @@ func TestMaxRetries_BoundsTheSDKRetryCount(t *testing.T) {
 	}
 }
 
-// try_timeout bounds each try, so a request the service never answers fails
-// as unavailable even under a caller's context with no deadline.
 func TestTryTimeout_BoundsAStalledRequest(t *testing.T) {
 	svc := newService(t, func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
@@ -295,7 +287,6 @@ func TestProbe_CallerDeadline(t *testing.T) {
 	}
 }
 
-// The rules ValidateKey applies are proved in keys_test.go.
 func TestCapabilities_MaxKeyLength(t *testing.T) {
 	c := newClient(t, testConfig(t, "http://127.0.0.1:10000/"+testAccount, nil))
 
@@ -304,8 +295,6 @@ func TestCapabilities_MaxKeyLength(t *testing.T) {
 	}
 }
 
-// A set Endpoint is the service URL as given, and the client appends the
-// container name to its path.
 func TestNew_EndpointPath(t *testing.T) {
 	for _, suffix := range []string{"/" + testAccount, "/" + testAccount + "/"} {
 		t.Run(suffix, func(t *testing.T) {
@@ -322,14 +311,8 @@ func TestNew_EndpointPath(t *testing.T) {
 	}
 }
 
-// defaultEndpointChild names the environment variable under which
-// TestNew_DefaultEndpoint runs as the child process it starts.
 const defaultEndpointChild = "AZUREBLOB_TEST_DEFAULT_ENDPOINT_CHILD"
 
-// An empty Endpoint means the account's public service URL. The test reruns
-// itself as a child whose HTTPS proxy is a listener here, so the host the
-// client dials is observed without leaving the machine: the child's Probe
-// tunnels through the proxy with a CONNECT to that host.
 func TestNew_DefaultEndpoint(t *testing.T) {
 	if os.Getenv(defaultEndpointChild) != "" {
 		cfg := testConfig(t, "", nil)
@@ -378,8 +361,6 @@ func TestNew_DefaultEndpoint(t *testing.T) {
 	}
 }
 
-// The upload option bounds that the package documentation lists are inclusive.
-// Their rejection one past each bound is in TestNew_RejectsBadUploadOptions.
 func TestNew_AcceptsUploadOptionBounds(t *testing.T) {
 	for _, opt := range []map[string]string{
 		{"block_size": "1048576"},
@@ -395,9 +376,6 @@ func TestNew_AcceptsUploadOptionBounds(t *testing.T) {
 	}
 }
 
-// An unset max_retries keeps the SDK's default of three retries. The
-// service's retry-after-ms answer stands in for the default backoff, so the
-// test does not wait it out.
 func TestMaxRetries_UnsetKeepsTheSDKDefault(t *testing.T) {
 	svc := newService(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("x-ms-retry-after-ms", "1")

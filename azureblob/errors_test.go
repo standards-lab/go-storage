@@ -10,15 +10,12 @@ import (
 	"github.com/standards-lab/go-storage"
 )
 
-// Every method classifies the service's answer the same way; Stat stands in
-// for them all. A transport failure, an expired deadline, and the caller's
-// cancellation are proved through Probe in client_test.go.
 func TestClassification(t *testing.T) {
 	cases := []struct {
 		name   string
 		status int
 		code   string
-		want   error // the sentinel the error must match, or nil for unclassified
+		want   error
 	}{
 		{"blob not found", http.StatusNotFound, "BlobNotFound", storage.ErrNotFound},
 		{"container not found", http.StatusNotFound, "ContainerNotFound", storage.ErrContainerNotFound},
