@@ -8,15 +8,15 @@ test support a provider proves itself against.
 
 `github.com/standards-lab/go-storage` is the base module. Provider sub-modules are nested modules
 that pin their SDKs and are released on their own tags: `azureblob` is the Azure Blob Storage
-provider, and `s3`, the second provider, is the S3 provider. Both pass the conformance suite,
-which validates the standard tier.
+provider and `s3` the S3 provider. Both pass the conformance suite, which validates the standard
+tier.
 
 ## Standard
 
 `go-storage` is an infrastructure library of
 [Go Elemental](https://github.com/standards-lab/architecture/blob/main/standards/go-elemental/README.md), the
-minimal-dependency Go standard. This README and each package's `doc.go` document the repository;
-the standard's principles it enhances are stated below. Its repository-level principles:
+minimal-dependency Go standard. This README and each package's `doc.go` document the repository.
+The repository-level principles below enhance the standard's:
 
 - The base module depends on the standard library and `go-core` alone. A provider's SDK lives in
   that provider's own sub-module, and the base module never imports it.

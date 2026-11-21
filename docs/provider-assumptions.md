@@ -7,7 +7,8 @@ the service that contradicts one invalidates the text that states it.
 and `--loose` (`compose/azurite/Dockerfile`), and no live Azure account has run it. The Azure SDK
 sends an `x-ms-version` that Azurite rejects unless its version check is off, and `--loose` ignores
 the headers Azurite doesn't support. The image defines no health check and has no curl, so the
-harness checks readiness with busybox `nc` on the blob port:
+harness checks readiness with busybox `nc` on the blob port. Three claims rest on Azure's
+documentation alone:
 
 - **`ValidateKey`'s rules and the container-name rules `New` applies.** They come from Azure's
   documentation. Azurite accepts every key that breaks them, so only unit tests cover them.
@@ -17,7 +18,7 @@ harness checks readiness with busybox `nc` on the blob port:
   Azurite's is the last key of the page, and Azure's is documented as an opaque token.
 
 Four claims the standard tier rests on concern S3. `s3` passes the conformance suite against
-SeaweedFS 4.54's S3 gateway, the image `compose/seaweedfs/Dockerfile` pins, started with
+SeaweedFS's S3 gateway, the image `compose/seaweedfs/Dockerfile` pins, started with
 `-s3.autoCreateBucket=false`, and each claim has a test against it; no live AWS account has run
 them:
 
@@ -55,9 +56,8 @@ them:
   service. AWS documents the same `Range` and `If-Match` semantics, untested.
 
 SeaweedFS differs from AWS where the tests had to accommodate it or where the adapter relies on
-neither behavior. Each SeaweedFS side was observed against 4.48, in the s3 spike or the acceptance
-tests, and the acceptance tests pass against 4.54; each AWS side is from AWS's documentation and
-untested:
+neither behavior. Each SeaweedFS side is what the acceptance tests observe against the image
+`compose/seaweedfs/Dockerfile` pins; each AWS side is from AWS's documentation and untested:
 
 - **A write to a missing bucket.** SeaweedFS creates the bucket on an admin's upload unless
   `-s3.autoCreateBucket=false`; AWS answers `NoSuchBucket`. With the default on, the

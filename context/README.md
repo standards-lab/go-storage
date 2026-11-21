@@ -21,4 +21,4 @@ and the documentation do not express.
   ([azureblob/doc.go](../azureblob/doc.go)).
 - **`s3`** (built): the S3 provider sub-module ([s3/doc.go](../s3/doc.go)).
 - **Managed identity** (planned): `azureblob` authenticates with the account's shared key, and
-  the deployment goal brings managed identity.
+  `v1.deployment` (`standards-lab/roadmap/index.toml`) brings managed identity.
