@@ -49,8 +49,8 @@ func New(c Client, cfg Config) *Store {
 // both under one context bounded by RequestTimeout, and marks the store
 // started. A failure matches [ErrUnavailable] and keeps the provider's
 // error, except that once the caller's ctx is done a failure matches
-// ctx.Err() and not ErrUnavailable, keeping a provider's error that does not
-// already match ctx.Err() alone as text only.
+// ctx.Err() and not ErrUnavailable. Then a provider's error that matches
+// ctx.Err() alone is returned as it is, and any other is kept as text only.
 //
 // Start returns [ErrNotReady] after Shutdown, and also when Shutdown runs
 // while Start is in progress. In that case Start skips the probe if Shutdown

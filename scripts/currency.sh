@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # currency reports every dependency, toolchain, and pin that trails its latest
 # release, one line each, and exits non-zero when it reports any. It reads the
-# network and writes nothing. The actions and images it checks are those of the
-# project root's workflows and, when the repository nests the project in a
-# subdirectory, of the git top-level's. A compose service that builds from
-# compose/<service>/Dockerfile is pinned on that Dockerfile's FROM line.
+# network and writes nothing. Run it through `mise run currency`. The actions
+# and images it checks are those of the project root's workflows and, when the
+# repository nests the project in a subdirectory, of the git top-level's. A
+# compose service that builds from compose/<service>/Dockerfile is pinned on
+# that Dockerfile's FROM line.
 #
 # Each scan captures its command's output in a variable before reading it, so
 # under set -e a scan command that fails (a go list missing a go.sum entry)

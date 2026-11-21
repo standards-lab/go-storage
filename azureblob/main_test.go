@@ -7,7 +7,7 @@ import (
 	_ "time/tzdata"
 )
 
-// See docs/design.md.
+// See docs/design.md
 func TestMain(m *testing.M) {
 	london, err := time.LoadLocation("Europe/London")
 	if err != nil {

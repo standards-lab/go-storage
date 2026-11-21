@@ -31,16 +31,14 @@ for mod in $GO_MODULES; do
 done
 cd "$MISE_PROJECT_ROOT"
 fail=0
-run_lint() {
-  if ! command -v "$1" >/dev/null; then
-    echo "FAIL: $1 is not on PATH; run mise install" >&2
+for lint in lint-context lint-references; do
+  if ! command -v "$lint" >/dev/null; then
+    echo "FAIL: $lint is not on PATH; run mise install" >&2
     fail=1
-    return
+  elif ! "$lint"; then
+    fail=1
   fi
-  "$1" || fail=1
-}
-run_lint lint-context
-run_lint lint-references
+done
 exit "$fail"
 '''
 

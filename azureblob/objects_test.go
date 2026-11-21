@@ -143,7 +143,7 @@ func TestPut_MultipleBlocks(t *testing.T) {
 	svc := newService(t, blobStored(testETag, testLastModified))
 	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"block_size": "1048576", "concurrency": "2"}))
 
-	const size = 5 << 19
+	const size = 2<<20 + 1<<19
 	content := bytes.Repeat([]byte{0xA5}, size)
 	obj, err := c.Put(t.Context(), "big", readOnly{bytes.NewReader(content)}, storage.PutOptions{ContentType: "application/octet-stream"})
 	if err != nil {
@@ -315,7 +315,7 @@ func TestPut_DeclaredSize(t *testing.T) {
 		blocks  int
 	}{
 		{"within one block", 32, nil, 0},
-		{"across several blocks", 5 << 19, map[string]string{"block_size": "1048576"}, 3},
+		{"across several blocks", 2<<20 + 1<<19, map[string]string{"block_size": "1048576"}, 3},
 	}
 	cases := []struct {
 		name                string

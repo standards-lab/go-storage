@@ -29,7 +29,7 @@ const (
 	maxConcurrency           = 32
 )
 
-// See docs/design.md.
+// See docs/design.md
 const (
 	sdkDefaultRetries int32 = 3
 	sdkNoRetries      int32 = -1
