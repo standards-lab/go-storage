@@ -8,8 +8,8 @@ test support a provider proves itself against.
 
 `github.com/standards-lab/go-storage` is the base module. Provider sub-modules are nested modules
 that pin their SDKs and are released on their own tags: `azureblob` is the Azure Blob Storage
-provider and `s3` the S3 provider. Both pass the conformance suite,
-which validates the standard tier.
+provider and `s3` the S3 provider. Both pass the conformance suite, which validates the standard
+tier.
 
 ## Standard
 

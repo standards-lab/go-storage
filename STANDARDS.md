@@ -14,4 +14,4 @@ The judgement calls the standards-reviewer applies to go-storage, beyond what `m
 - `architecture/standards/go-elemental/principles/construction-and-execution.md`: `storagetest.Options`, the one options value `storagetest.NewFake` takes.
 - `architecture/principles/service-tiers.md`: `Client` and the `azureblob` and `s3` adapters beneath it.
 - `architecture/principles/comments.md`: every comment; a file's reasoning lives in `docs/design.md`, `docs/provider-assumptions.md` and each `doc.go`.
-- `architecture/principles/context-architecture.md`: the README, `docs/design.md`, `docs/provider-assumptions.md` and each `doc.go`.
+- `architecture/principles/context-architecture.md`: the README, `docs/design.md`, `docs/provider-assumptions.md` and each `doc.go` are the homes.
