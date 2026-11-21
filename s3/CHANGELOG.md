@@ -7,6 +7,11 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Changed
+
+- The aws-sdk-go-v2 requirements are `credentials` v1.21.3, `feature/s3/transfermanager` v0.5.11
+  and `service/s3` v1.116.0.
+
 ## [v0.3.0] - 2026-11-11
 
 ### Changed
