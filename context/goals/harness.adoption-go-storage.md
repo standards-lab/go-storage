@@ -62,11 +62,11 @@ Two-way. Nothing is tagged.
 
 ## Progress
 
-slices 0/6 committed · standards — · spec — · editor —
+slices 6/6 committed · standards ✓ · spec ✓ · editor ✓
 
 ## Decisions
 
-- adopt: CHANGELOG entries record only changes to a module's `go.mod` requirements. (wave 1, W2)
+None.
 
 ## Pending edits
 

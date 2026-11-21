@@ -124,7 +124,7 @@ once for each of its concurrent `Put`s.
 
 ## What the SDKs do beneath the adapters
 
-Each adapter works around SDK behavior its package documentation does not state:
+Each adapter works around SDK behavior that the adapter's package documentation leaves out:
 
 - **A Put body's failure.** The Azure SDK's streaming upload drops an error that arrives with the
   bytes completing a block, so `azureblob`'s `Put` records the body's first failure and repeats it
@@ -143,7 +143,7 @@ Each adapter works around SDK behavior its package documentation does not state:
   credentials file and takes none of its options from the environment, so `s3.New` sets every
   option it builds. Request middleware still reads a few environment variables that shape only
   headers such as the user agent.
-- **Multipart thresholds.** transfermanager's threshold is set to the part size, so it would take a
+- **transfermanager's options.** Its threshold is set to the part size, so it would take a
   body of one part as a multipart upload; `Put` sends that body as a `PutObject` itself and hands
   transfermanager only a longer one. transfermanager's concurrency is its number of part workers,
   so it bounds the `UploadPart` requests in flight, and its fail timeout gives the abort after a

@@ -59,8 +59,8 @@ the standard's principles it enhances are stated below. Its repository-level pri
 ## Development
 
 The repository uses a Go workspace and [mise](https://mise.jdx.dev). The tasks that run over every
-module read `GO_MODULES` in `mise.toml`, which lists the modules of `go.work`'s use-list; a new
-sub-module is added to both:
+module take the module list from `GO_MODULES` in `mise.toml`, which repeats `go.work`'s use-list,
+so a new sub-module is added to both:
 
 ```
 mise run check      # build, vet, format, fix, tidy, test, and lint every module, then lint-context and lint-references; writes nothing

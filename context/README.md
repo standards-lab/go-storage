@@ -5,12 +5,12 @@ go-storage is the object storage infrastructure library of Go Elemental: the sta
 the `Capabilities` provider constraints, the error sentinels, and the `storagetest` conformance
 suite, with each provider isolated in its own sub-module.
 
-The README, `docs/design.md`, and each package's `doc.go` document this repository. The
+The README, `docs/design.md`, and each package's `doc.go` document this repository, and
+[`docs/provider-assumptions.md`](../docs/provider-assumptions.md) lists the provider claims no run
+against the live service has proven, with the tests that cover each. The
 [Go Elemental](https://github.com/standards-lab/architecture/blob/main/standards/go-elemental/README.md)
 standard states the principles it follows. This context records only working knowledge the code
-and the documentation do not express. [`docs/provider-assumptions.md`](../docs/provider-assumptions.md)
-lists the provider claims no run against the live service has proven, and the tests that cover
-each.
+and the documentation do not express.
 
 ## Capability map
 

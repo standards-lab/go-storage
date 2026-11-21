@@ -7,7 +7,7 @@ the service that contradicts one invalidates the text that states it.
 and `--loose` (`compose/azurite/Dockerfile`), and no live Azure account has run it. The Azure SDK
 sends an `x-ms-version` that Azurite rejects unless its version check is off, and `--loose` ignores
 the headers Azurite doesn't support. The image defines no health check and has no curl, so the
-harness's check is busybox `nc` on the blob port:
+harness checks readiness with busybox `nc` on the blob port:
 
 - **`ValidateKey`'s rules and the container-name rules `New` applies.** They come from Azure's
   documentation. Azurite accepts every key that breaks them, so only unit tests cover them.
@@ -63,9 +63,9 @@ untested:
   `-s3.autoCreateBucket=false`; AWS answers `NoSuchBucket`. With the default on, the
   missing-container checks cannot pass, so the harness turns it off.
 - **Readiness.** SeaweedFS's gateway answers unsigned requests before it has loaded its admin
-  credential, so the harness waits for a listing signed with that credential, the
-  `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` SeaweedFS reads at startup and the s3 acceptance
-  tests sign with.
+  credential, so the harness waits for a listing signed with that credential: the
+  `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` that SeaweedFS reads at startup and the s3
+  acceptance tests sign with.
 - **The signature region.** SeaweedFS accepts any region in a signature; AWS requires the
   bucket's. `TestProbe_RegionOption` proves the option signs the request, but no run shows a
   wrong region failing.
