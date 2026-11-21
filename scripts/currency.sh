@@ -33,7 +33,7 @@ matches() {
 
 collect_workflows() {
 	local root top
-	root=$(pwd -P)
+	root=$(pwd -P) || return
 	top=$(git rev-parse --show-toplevel 2>/dev/null || echo "$root")
 	workflows=("$root"/.github/workflows/*.yml)
 	[ "$top" = "$root" ] || workflows+=("$top"/.github/workflows/*.yml)
