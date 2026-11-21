@@ -24,12 +24,8 @@ var _ storage.Client = (*Fake)(nil)
 // Options.Capabilities does not replace it.
 const DefaultMaxKeyLength = 1024
 
-// defaultPageSize is the page size List uses when Limit is 0 and
-// Options.PageSize does not replace it. It is small so a test that lists
-// more than a handful of objects pages.
 const defaultPageSize = 3
 
-// defaultContentType is the ContentType a Put without one stores.
 const defaultContentType = "application/octet-stream"
 
 var (
@@ -59,20 +55,14 @@ var (
 // A Fake is safe for concurrent use. A test that embeds *Fake in its own
 // type can override one method and keep the rest.
 type Fake struct {
-	// down is the outage toggle. Every method consults it.
 	down atomic.Bool
 
-	// hasContainer is the container toggle. Options.NoContainer and
-	// DropContainer clear it, and EnsureContainer sets it.
 	hasContainer atomic.Bool
 
-	// puts counts Put calls, whether or not they succeeded.
 	puts atomic.Int64
 
-	// ensures counts EnsureContainer calls, whether or not they succeeded.
 	ensures atomic.Int64
 
-	// probes counts Probe calls, whether or not they succeeded.
 	probes atomic.Int64
 
 	now      func() time.Time
@@ -82,7 +72,6 @@ type Fake struct {
 	mu      sync.Mutex
 	objects map[string]object
 
-	// putErr, when set, fails every Put after the body has been fully read.
 	putErr error
 
 	lastPutOpts     storage.PutOptions
@@ -150,8 +139,6 @@ func NewFake(opts Options) *Fake {
 	return f
 }
 
-// validateKey is the default ValidateKey: a key is non-empty and at most
-// DefaultMaxKeyLength runes.
 func validateKey(key string) error {
 	if key == "" {
 		return errors.New("storagetest: empty key")

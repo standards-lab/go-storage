@@ -16,7 +16,6 @@ import (
 
 var _ storage.Client = (*storagetest.Fake)(nil)
 
-// putString stores content at key and fails the test on error.
 func putString(t *testing.T, c storage.Client, key, content string) storage.Object {
 	t.Helper()
 	obj, err := c.Put(context.Background(), key, strings.NewReader(content), storage.PutOptions{})
@@ -26,7 +25,6 @@ func putString(t *testing.T, c storage.Client, key, content string) storage.Obje
 	return obj
 }
 
-// readBlob drains and closes a Get result.
 func readBlob(t *testing.T, blob storage.Blob) string {
 	t.Helper()
 	data, err := io.ReadAll(blob.Body)
@@ -39,8 +37,6 @@ func readBlob(t *testing.T, blob storage.Blob) string {
 	return string(data)
 }
 
-// listKeys walks a listing to its final page and returns every key seen, in
-// order, along with the number of pages it took.
 func listKeys(t *testing.T, c storage.Client, prefix string, limit int) ([]string, int) {
 	t.Helper()
 	var keys []string
@@ -65,13 +61,11 @@ func listKeys(t *testing.T, c storage.Client, prefix string, limit int) ([]strin
 	}
 }
 
-// errReader fails on its first Read.
 type errReader struct{ err error }
 
 func (r errReader) Read([]byte) (int, error) { return 0, r.err }
 
 func TestFake_PutGetRoundTrip(t *testing.T) {
-	// A clock in another zone shows the Fake stamps its reading in UTC.
 	stamp := time.Date(2026, 9, 18, 14, 0, 0, 0, time.FixedZone("CEST", 2*60*60))
 	f := storagetest.NewFake(storagetest.Options{Clock: func() time.Time { return stamp }})
 	ctx := context.Background()
@@ -245,8 +239,6 @@ func TestFake_ListPagesToTheEnd(t *testing.T) {
 		t.Errorf("pages = %d, want 3 for 5 objects at Limit 2", pages)
 	}
 
-	// The last page of an exact multiple has an empty Next rather than an
-	// empty trailing page.
 	putString(t, f, "k6", "k6")
 	if _, pages := listKeys(t, f, "", 2); pages != 3 {
 		t.Errorf("pages = %d, want 3 for 6 objects at Limit 2", pages)
@@ -312,8 +304,6 @@ func TestFake_PutDefaultsContentType(t *testing.T) {
 	}
 }
 
-// Put reads its body and records the call before it reports an outage or a
-// missing container, as a provider learns the outcome only after it sends.
 func TestFake_PutRecordsBeforeFailing(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -434,8 +424,6 @@ func TestFake_PutInjectedFailure(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Fatalf("Put = %v, want the injected failure", err)
 	}
-	// The failure fires after the body has been read, which is when a real
-	// provider learns the outcome of its request.
 	if _, consumed := f.LastPut(); consumed != 3 {
 		t.Errorf("consumed = %d, want the whole body read before the failure", consumed)
 	}
@@ -539,15 +527,12 @@ func TestFake_EnsureContainerCreatesOnce(t *testing.T) {
 	if deadline, bounded := f.LastEnsure(); !bounded || !deadline.Equal(want) || deadline.Location() != time.UTC {
 		t.Errorf("LastEnsure() = %v, %t; want %v in UTC, true", deadline, bounded, want.UTC())
 	}
-	// Put runs first, so every later operation finds the key or, for
-	// Delete, removes it.
 	for _, op := range ops {
 		if err := op.call(); err != nil {
 			t.Errorf("%s after EnsureContainer = %v, want nil", op.name, err)
 		}
 	}
 
-	// The container is created empty and a repeat call leaves it as it is.
 	putString(t, f, "kept", "v")
 	if err := f.EnsureContainer(ctx); err != nil {
 		t.Fatalf("EnsureContainer over an existing container: %v", err)
@@ -571,7 +556,6 @@ func TestFake_Capabilities(t *testing.T) {
 	if err := got.ValidateKey(""); err == nil {
 		t.Error("ValidateKey of an empty key = nil, want an error")
 	}
-	// The limit counts runes, so a multi-byte key at the limit passes.
 	if err := got.ValidateKey(strings.Repeat("\u00e9", storagetest.DefaultMaxKeyLength)); err != nil {
 		t.Errorf("ValidateKey of a key at the limit = %v, want nil", err)
 	}
@@ -592,8 +576,6 @@ func TestFake_Capabilities(t *testing.T) {
 	}
 }
 
-// Options.Capabilities replaces the default key rules whole once either
-// field is set: the Fake never fills in the other field from its default.
 func TestFake_CapabilitiesReplaceDefaultWhole(t *testing.T) {
 	got := storagetest.NewFake(storagetest.Options{Capabilities: storage.Capabilities{MaxKeyLength: 17}}).Capabilities()
 	if got.MaxKeyLength != 17 {
@@ -615,8 +597,6 @@ func TestFake_CapabilitiesReplaceDefaultWhole(t *testing.T) {
 	}
 }
 
-// The zero Options stamps Puts with the wall clock in UTC and starts with the
-// container present.
 func TestFake_ZeroOptions(t *testing.T) {
 	f := storagetest.NewFake(storagetest.Options{})
 	if !f.HasContainer() {
@@ -653,7 +633,6 @@ func TestFake_DropContainer(t *testing.T) {
 		t.Errorf("Probe after DropContainer = %v, want ErrContainerNotFound wrapping ErrNoSuchContainer", err)
 	}
 
-	// The container comes back empty: the drop took its objects with it.
 	if err := f.EnsureContainer(ctx); err != nil {
 		t.Fatalf("EnsureContainer after DropContainer: %v", err)
 	}
@@ -689,8 +668,6 @@ func TestFake_ConcurrentPutGet(t *testing.T) {
 					t.Errorf("Get(%s): %v", key, err)
 					return
 				}
-				// The body is read inline because t.Fatal is not allowed
-				// off the test goroutine.
 				data, err := io.ReadAll(blob.Body)
 				_ = blob.Body.Close()
 				if err != nil {

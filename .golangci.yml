@@ -9,7 +9,11 @@ linters:
   # hook the API cannot reach deterministically.
   default: standard
   enable:
+    - nolintlint
     - testpackage
   settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     testpackage:
       skip-regexp: 'export_test\.go'

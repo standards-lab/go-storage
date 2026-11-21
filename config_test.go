@@ -13,8 +13,6 @@ import (
 	"github.com/standards-lab/go-storage"
 )
 
-// validConfig satisfies the one required field; everything else exercises
-// defaults under test.
 func validConfig() storage.Config {
 	return storage.Config{Container: "assets"}
 }
@@ -49,7 +47,6 @@ func TestConfig_MergeOverlaysSetFields(t *testing.T) {
 	if base.RequestTimeout == nil || base.RequestTimeout.Duration() != 3*time.Second {
 		t.Errorf("RequestTimeout = %v, want 3s", base.RequestTimeout)
 	}
-	// Fields the overlay leaves unset keep the base values.
 	if base.Container != "assets" {
 		t.Errorf("Container = %s, want assets", base.Container)
 	}
@@ -75,14 +72,11 @@ func TestConfig_MergeOptionsKeyWise(t *testing.T) {
 	if got := base.Options["region"]; got != "eu-west-1" {
 		t.Errorf("Options[region] = %s, want eu-west-1", got)
 	}
-	// An overlay key overrides without dropping the others.
 	if got := base.Options["path_style"]; got != "true" {
 		t.Errorf("Options[path_style] = %s, want true", got)
 	}
 }
 
-// Merge writes into a copy, so a map the receiver shares with the caller
-// keeps its values.
 func TestConfig_MergeCopiesOptions(t *testing.T) {
 	shared := map[string]string{"max_retries": "4"}
 	base := storage.Config{Container: "assets", Options: shared}
@@ -117,7 +111,6 @@ func TestConfig_FinalizeDefaults(t *testing.T) {
 	if cfg.ReadIdleTimeout == nil || cfg.ReadIdleTimeout.Duration() != 30*time.Second {
 		t.Errorf("ReadIdleTimeout = %v, want 30s", cfg.ReadIdleTimeout)
 	}
-	// The size limits are application policy and keep no base default.
 	if cfg.MaxObjectSize != 0 {
 		t.Errorf("MaxObjectSize = %d, want 0", cfg.MaxObjectSize)
 	}
@@ -160,7 +153,6 @@ func TestConfig_FinalizeEnvOverrides(t *testing.T) {
 		t.Fatalf("Finalize: %v", err)
 	}
 
-	// Each override beats the value the file layer set.
 	if cfg.Endpoint != "https://blob.internal" {
 		t.Errorf("Endpoint = %s, want https://blob.internal", cfg.Endpoint)
 	}
@@ -173,7 +165,6 @@ func TestConfig_FinalizeEnvOverrides(t *testing.T) {
 	if cfg.Key != "secret" {
 		t.Errorf("Key = %s, want secret", cfg.Key)
 	}
-	// The value exceeds int32, so it proves the int64 parse path.
 	if cfg.MaxObjectSize != 5368709120 {
 		t.Errorf("MaxObjectSize = %d, want 5368709120", cfg.MaxObjectSize)
 	}
@@ -188,9 +179,6 @@ func TestConfig_FinalizeEnvOverrides(t *testing.T) {
 	}
 }
 
-// Each APP_STORAGE_OPTIONS_<KEY> variable sets the provider option <key>,
-// lower-cased, over the file's value and beside the file's other options;
-// an empty value and a bare prefix set nothing.
 func TestConfig_FinalizeOptionsEnv(t *testing.T) {
 	cfg := validConfig()
 	cfg.Options = map[string]string{"max_retries": "4", "block_size": "1048576"}
@@ -208,7 +196,6 @@ func TestConfig_FinalizeOptionsEnv(t *testing.T) {
 		t.Errorf("Options = %v, want %v", cfg.Options, want)
 	}
 
-	// A map the caller shares keeps its values.
 	shared := map[string]string{"max_retries": "4"}
 	tmpl := validConfig()
 	tmpl.Options = shared
@@ -256,7 +243,6 @@ func TestConfig_FinalizeMalformedEnvFails(t *testing.T) {
 }
 
 func TestConfig_FinalizeZeroEnvDisablesOverrides(t *testing.T) {
-	// The zero Env names no variables, so ambient values cannot leak in.
 	t.Setenv("TEST_STORAGE_CONTAINER", "assets_test")
 	t.Setenv("TEST_STORAGE_OPTIONS_MAX_RETRIES", "1")
 	t.Setenv("TEST_STORAGE_REQUEST_TIMEOUT", "3s")
@@ -336,8 +322,6 @@ func TestConfig_Validate(t *testing.T) {
 }
 
 func TestConfig_ValidateAllowsUnsetSizes(t *testing.T) {
-	// A MaxObjectSize of 0 means unbounded and a ListPageSize of 0 means the
-	// provider's default; both survive validation.
 	cfg := validConfig()
 	cfg.MaxObjectSize = 0
 	cfg.ListPageSize = 0
@@ -347,8 +331,6 @@ func TestConfig_ValidateAllowsUnsetSizes(t *testing.T) {
 	}
 }
 
-// The go-core contract end to end: config.Load reads the base file and the
-// secrets file, merges them, and finalizes the result with defaults applied.
 func TestConfig_Load(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "config.json"),
@@ -367,12 +349,9 @@ func TestConfig_Load(t *testing.T) {
 	if cfg.RequestTimeout == nil || cfg.RequestTimeout.Duration() != 30*time.Second {
 		t.Errorf("RequestTimeout = %v, want 30s", cfg.RequestTimeout)
 	}
-	// The secrets layer supplies the credential.
 	if cfg.Key != "secret" {
 		t.Errorf("Key = %s, want secret", cfg.Key)
 	}
-	// Finalize ran: the override names are composed and the size limits keep
-	// no default.
 	if cfg.Env.Container != "APP_STORAGE_CONTAINER" {
 		t.Errorf("Env.Container = %s, want APP_STORAGE_CONTAINER", cfg.Env.Container)
 	}

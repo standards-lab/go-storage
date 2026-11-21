@@ -17,20 +17,10 @@ import (
 	"github.com/standards-lab/go-storage"
 )
 
-// cleanupTimeout bounds each delete the suite issues while a subtest cleans
-// up, because the subtest's own context is already cancelled by then.
 const cleanupTimeout = 30 * time.Second
 
-// largeBodySize is the length of the one body the suite stores that is
-// larger than a typical single upload block, so a provider that splits a body
-// into blocks is exercised. 3 MiB clears a 1 MiB block, the smallest the
-// Azure SDK's streaming upload accepts, with room for a second and a third
-// block; a provider whose block is configurable runs the suite at that
-// floor.
 const largeBodySize = 3 << 20
 
-// maxPages bounds a listing walk so a provider that never returns an empty
-// Next fails the test instead of hanging it.
 const maxPages = 100
 
 // Run is the conformance suite for a storage.Client. It runs one subtest per
@@ -41,6 +31,11 @@ const maxPages = 100
 // run against a shared container that holds other objects. It asserts the
 // contract [storage.Client] documents and nothing a provider is free to
 // choose, such as listing order or a ModifiedAt near the wall clock.
+//
+// One subtest stores a 3 MiB body, so a provider that splits a body into
+// blocks is exercised: it clears a 1 MiB block, the smallest the Azure SDK's
+// streaming upload accepts, with room for a second and a third block. A
+// provider whose block size is configurable runs the suite at that floor.
 func Run(t *testing.T, newClient func(t *testing.T) storage.Client) {
 	t.Helper()
 	for _, tc := range cases {
@@ -109,16 +104,11 @@ func checkMissingContainer(t testing.TB, c storage.Client) {
 	}
 }
 
-// testCase is one contract behavior. check receives a client whose container
-// exists and a prefix every key it writes must start with.
 type testCase struct {
 	name  string
 	check func(t testing.TB, c storage.Client, prefix string)
 }
 
-// run ensures the container and then runs the case under a fresh prefix. It
-// takes a testing.TB so the package's own tests can run one case through a
-// recorder and assert that a broken client fails it.
 func (tc testCase) run(t testing.TB, c storage.Client) {
 	t.Helper()
 	if err := c.EnsureContainer(t.Context()); err != nil {
@@ -145,12 +135,8 @@ var cases = []testCase{
 	{"Capabilities", checkCapabilities},
 }
 
-// errBodyBroke is the error a failAfter body returns once its bytes are
-// spent, standing in for a source that broke mid-upload.
 var errBodyBroke = errors.New("storagetest: body source broke")
 
-// failAfter yields the bytes of r and then fails with err instead of io.EOF,
-// on that Read and every later one.
 type failAfter struct {
 	r   io.Reader
 	err error
@@ -164,15 +150,11 @@ func (f *failAfter) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// isEntityTag reports whether s is an HTTP entity tag: a quoted string,
-// optionally prefixed with W/ for a weak validator.
 func isEntityTag(s string) bool {
 	s = strings.TrimPrefix(s, "W/")
 	return len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"'
 }
 
-// newPrefix returns a key prefix no other run shares. It is ASCII letters,
-// digits, and slashes, so it satisfies any provider's key rules.
 func newPrefix(t testing.TB) string {
 	t.Helper()
 	var b [8]byte
@@ -182,8 +164,6 @@ func newPrefix(t testing.TB) string {
 	return "storagetest/" + hex.EncodeToString(b[:]) + "/"
 }
 
-// put stores body at key with opts, registers a cleanup that deletes the
-// key, and returns what Put reported.
 func put(t testing.TB, c storage.Client, key string, body io.Reader, opts storage.PutOptions) storage.Object {
 	t.Helper()
 	deleteOnCleanup(t, c, key)
@@ -194,8 +174,6 @@ func put(t testing.TB, c storage.Client, key string, body io.Reader, opts storag
 	return obj
 }
 
-// deleteOnCleanup registers a cleanup that removes key. The delete's error is
-// ignored: cleanup is best effort, and a key the test never wrote is a no-op.
 func deleteOnCleanup(t testing.TB, c storage.Client, key string) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -205,8 +183,6 @@ func deleteOnCleanup(t testing.TB, c storage.Client, key string) {
 	})
 }
 
-// get reads and closes the object at key and returns its content and
-// metadata.
 func get(t testing.TB, c storage.Client, key string) ([]byte, storage.Object) {
 	t.Helper()
 	blob, err := c.Get(t.Context(), key, storage.GetOptions{})
@@ -224,7 +200,6 @@ func get(t testing.TB, c storage.Client, key string) ([]byte, storage.Object) {
 	return data, blob.Object
 }
 
-// stat returns the metadata of the object at key.
 func stat(t testing.TB, c storage.Client, key string) storage.Object {
 	t.Helper()
 	obj, err := c.Stat(t.Context(), key)
@@ -234,10 +209,6 @@ func stat(t testing.TB, c storage.Client, key string) storage.Object {
 	return obj
 }
 
-// wantObject asserts got describes key with the given size and content type,
-// carries a non-empty ETag and a non-zero ModifiedAt in time.UTC, and agrees
-// with want on the ETag and ModifiedAt. what names the call that produced
-// got.
 func wantObject(t testing.TB, what string, got, want storage.Object, key string, size int64, contentType string) {
 	t.Helper()
 	if got.Key != key {
@@ -265,8 +236,6 @@ func wantObject(t testing.TB, what string, got, want storage.Object, key string,
 	}
 }
 
-// wantContent asserts Get and Stat of key agree with put on the content and
-// the metadata.
 func wantContent(t testing.TB, c storage.Client, key string, put storage.Object, content []byte, contentType string) {
 	t.Helper()
 	size := int64(len(content))
@@ -281,8 +250,6 @@ func wantContent(t testing.TB, c storage.Client, key string, put storage.Object,
 	wantObject(t, "Stat", stat(t, c, key), put, key, size, contentType)
 }
 
-// firstDifference describes where got and want diverge, for a failure
-// message that stays readable on a large body.
 func firstDifference(got, want []byte) string {
 	n := min(len(got), len(want))
 	for i := range n {
@@ -296,8 +263,6 @@ func firstDifference(got, want []byte) string {
 	return ""
 }
 
-// wantNotFound asserts err matches storage.ErrNotFound and neither
-// storage.ErrContainerNotFound nor storage.ErrUnavailable.
 func wantNotFound(t testing.TB, what string, err error) {
 	t.Helper()
 	switch {
@@ -310,10 +275,6 @@ func wantNotFound(t testing.TB, what string, err error) {
 	}
 }
 
-// listAll walks a listing under prefix to its final page and returns every
-// object seen, in the order seen, and the number of pages. It fails the test
-// on a page longer than limit, on a key outside prefix, and on a walk that
-// does not end within maxPages.
 func listAll(t testing.TB, c storage.Client, prefix string, limit int) ([]storage.Object, int) {
 	t.Helper()
 	var objects []storage.Object
@@ -344,9 +305,6 @@ func listAll(t testing.TB, c storage.Client, prefix string, limit int) ([]storag
 	}
 }
 
-// wantKeys asserts objects holds exactly the keys in want, each once, with
-// the Size and the ETag that Put reported for it and a ModifiedAt in
-// time.UTC.
 func wantKeys(t testing.TB, what string, objects []storage.Object, want map[string]storage.Object) {
 	t.Helper()
 	seen := make(map[string]int, len(objects))
@@ -380,14 +338,10 @@ func wantKeys(t testing.TB, what string, objects []storage.Object, want map[stri
 	}
 }
 
-// readOnly hides every method of the underlying reader except Read, so a
-// provider sees a body it can neither seek nor measure.
 type readOnly struct{ r io.Reader }
 
 func (r readOnly) Read(p []byte) (int, error) { return r.r.Read(p) }
 
-// largeBody returns largeBodySize bytes of deterministic pseudo-random
-// content.
 func largeBody() []byte {
 	data := make([]byte, largeBodySize)
 	_, _ = mathrand.NewChaCha8([32]byte{'s', 't', 'o', 'r', 'a', 'g', 'e'}).Read(data)
@@ -491,7 +445,6 @@ func checkList(t testing.TB, c storage.Client, prefix string) {
 		key := prefix + name
 		under[key] = put(t, c, key, strings.NewReader(name+" content"), storage.PutOptions{})
 	}
-	// A key under a sibling prefix must never appear in a listing of prefix.
 	sibling := strings.TrimSuffix(prefix, "/") + "-sibling/other"
 	put(t, c, sibling, strings.NewReader("other"), storage.PutOptions{})
 
@@ -553,8 +506,6 @@ func checkPutOneByteReads(t testing.TB, c storage.Client, prefix string) {
 	wantContent(t, c, key, obj, content, "application/octet-stream")
 }
 
-// wantAbsent asserts key holds no object: Stat matches ErrNotFound and a
-// listing under prefix does not show it.
 func wantAbsent(t testing.TB, c storage.Client, prefix, key string) {
 	t.Helper()
 	_, err := c.Stat(t.Context(), key)
@@ -567,17 +518,12 @@ func wantAbsent(t testing.TB, c storage.Client, prefix, key string) {
 	}
 }
 
-// failedPut is one way a Put fails: body is the body and opts the options
-// that must make it fail.
 type failedPut struct {
 	name string
 	body func() io.Reader
 	opts storage.PutOptions
 }
 
-// checkFailedPuts runs each failed Put against a fresh key, which must then
-// be absent, and against a key that already holds an object, which must then
-// hold it unchanged.
 func checkFailedPuts(t testing.TB, c storage.Client, prefix string, puts []failedPut) {
 	t.Helper()
 	for i, fp := range puts {

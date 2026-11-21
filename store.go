@@ -21,8 +21,6 @@ type Store struct {
 	requestTimeout time.Duration
 	readIdle       time.Duration
 
-	// started gates the object operations. mu serializes the transitions
-	// Start and Shutdown make, and shut records that Shutdown has run.
 	started atomic.Bool
 	mu      sync.Mutex
 	shut    bool
@@ -51,7 +49,8 @@ func New(c Client, cfg Config) *Store {
 // both under one context bounded by RequestTimeout, and marks the store
 // started. A failure matches [ErrUnavailable] and keeps the provider's
 // error, except that once the caller's ctx is done a failure matches
-// ctx.Err() and not ErrUnavailable.
+// ctx.Err() and not ErrUnavailable, keeping a provider's error that does not
+// already match ctx.Err() alone as text only.
 //
 // Start returns [ErrNotReady] after Shutdown, and also when Shutdown runs
 // while Start is in progress. In that case Start skips the probe if Shutdown
@@ -88,12 +87,6 @@ func (s *Store) isShut() bool {
 	return s.shut
 }
 
-// startFailure classifies a Start failure. A Shutdown that has run makes it
-// [ErrNotReady]. Once the caller's ctx is done, the result matches ctx.Err()
-// and not ErrUnavailable: the provider's error passes through when it
-// already matches ctx.Err() alone, and is otherwise kept as text only.
-// Otherwise the failure matches ErrUnavailable, with an error the provider
-// already classified passing through unchanged.
 func (s *Store) startFailure(ctx context.Context, err error) error {
 	if s.isShut() {
 		return ErrNotReady
@@ -102,7 +95,6 @@ func (s *Store) startFailure(ctx context.Context, err error) error {
 		if errors.Is(err, ctxErr) && !errors.Is(err, ErrUnavailable) {
 			return err
 		}
-		// %v keeps the provider's text but not its classification.
 		return fmt.Errorf("%w: %v", ctxErr, err)
 	}
 	if errors.Is(err, ErrUnavailable) {
@@ -165,8 +157,6 @@ func (s *Store) Put(ctx context.Context, key string, body io.Reader, opts PutOpt
 		return Object{}, fmt.Errorf("%w: declared size %d exceeds the configured max object size (%d bytes)", ErrTooLarge, opts.Size, s.maxObjectSize)
 	}
 
-	// The bound is the inner reader, so a body past a Size equal to the
-	// bound reports ErrTooLarge.
 	var bounded, sized *limitReader
 	if s.maxObjectSize > 0 {
 		bounded = newLimitReader(body, s.maxObjectSize, false,
@@ -189,8 +179,6 @@ func (s *Store) Put(ctx context.Context, key string, body io.Reader, opts PutOpt
 	return obj, err
 }
 
-// readFailure combines the error a limitReader recorded with what the
-// provider returned, so the provider's cause stays matchable.
 func readFailure(recorded, provider error) error {
 	switch {
 	case provider == nil:
@@ -280,11 +268,6 @@ func (s *Store) Container() string {
 	return s.container
 }
 
-// limitReader lets limit bytes through and fails on the first byte past
-// them with long. When exact is set, an io.EOF before limit bytes fails too,
-// with an error wrapping io.ErrUnexpectedEOF. A failure is repeated on every
-// later Read, and tripped is atomic so Put can read it after the provider
-// returns.
 type limitReader struct {
 	r       io.Reader
 	limit   int64
@@ -305,7 +288,6 @@ func (l *limitReader) Read(p []byte) (int, error) {
 	}
 	remain := l.limit - l.read
 	if remain <= 0 {
-		// One more byte from the source means the body runs past the limit.
 		var probe [1]byte
 		n, err := l.r.Read(probe[:])
 		if n > 0 {
@@ -324,7 +306,6 @@ func (l *limitReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// trip records err as the failure every later Read reports and returns it.
 func (l *limitReader) trip(err error) error {
 	l.err = err
 	l.tripped.Store(true)
