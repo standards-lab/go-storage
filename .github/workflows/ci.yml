@@ -17,8 +17,6 @@ jobs:
       - name: mise run check
         run: mise run check
 
-  # azureblob's and s3's acceptance tests run the conformance suite against the
-  # compose harness's Azurite and SeaweedFS, through the task a developer runs.
   acceptance:
     runs-on: ubuntu-latest
     steps:
