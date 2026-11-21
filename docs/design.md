@@ -122,6 +122,39 @@ the service has acknowledged and holds up to 64 MiB while it starts. A body of a
 one `PutObject` sent from that buffer. As with `azureblob`, a process holds the per-`Put` figure
 once for each of its concurrent `Put`s.
 
+## What the SDKs do beneath the adapters
+
+Each adapter works around SDK behavior its package documentation does not state:
+
+- **A Put body's failure.** The Azure SDK's streaming upload drops an error that arrives with the
+  bytes completing a block, so `azureblob`'s `Put` records the body's first failure and repeats it
+  on every later read, which lets it tell a failure of the body from one of the upload.
+- **Retry counts.** The Azure retry policy reads a zero `MaxRetries` as its default of 3 and a
+  negative one as one try, so `azureblob` sends -1 for `max_retries` 0. The Azure retry reader
+  treats a count below 1 as its default of 3 too, so with no retries `Get` returns the response
+  body itself. The AWS SDK's `RetryMaxAttempts` counts the first try, and 0 means the standard
+  retryer's default of three attempts, so `s3` resumes a `Get` body as many times as the retryer
+  allows a request beyond its first.
+- **A Get with no body.** The Azure SDK answers a `Get Blob` without a body only for a 304, which
+  needs an access condition `azureblob` never sends; `Get` fails on one all the same.
+- **No answer.** The AWS SDK wraps a send failure in a `ResponseError` with no response and status
+  0, so `s3` counts a request as answered only when its `ResponseError` carries a status.
+- **Configuration.** `awss3.New`, unlike `config.LoadDefaultConfig`, loads no shared config or
+  credentials file and takes none of its options from the environment, so `s3.New` sets every
+  option it builds. Request middleware still reads a few environment variables that shape only
+  headers such as the user agent.
+- **Multipart thresholds.** transfermanager's threshold is set to the part size, so it would take a
+  body of one part as a multipart upload; `Put` sends that body as a `PutObject` itself and hands
+  transfermanager only a longer one. transfermanager's concurrency is its number of part workers,
+  so it bounds the `UploadPart` requests in flight, and its fail timeout gives the abort after a
+  failure a context of its own, so the caller's cancellation does not cancel the abort too.
+- **Times.** The Azure SDK parses a `Last-Modified` header with `time.RFC1123`, and the AWS SDK
+  falls back to RFC 850 for a date that is not an IMF-fixdate; either places the time in a fixed
+  "GMT" zone, or in `time.Local` on a host whose zone abbreviates GMT, such as Europe/London.
+  azcore parses a listing's time in a fixed GMT zone since v1.23.2. Each adapter converts every
+  time it reports to UTC, and each provider's tests run with `time.Local` set to Europe/London, so
+  a time left outside UTC fails their `==` comparisons whatever zone the host runs in.
+
 ## Swapping providers
 
 A provider swap is a configuration change, reviewed for three differences:

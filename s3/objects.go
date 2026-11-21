@@ -21,8 +21,6 @@ import (
 	"github.com/standards-lab/go-storage"
 )
 
-// defaultContentType is what Put sends and reports when opts.ContentType is
-// empty, the type S3 stores for an object written without one.
 const defaultContentType = "application/octet-stream"
 
 // Put sends a body of at most one part as a single PutObject and a longer
@@ -43,8 +41,13 @@ const defaultContentType = "application/octet-stream"
 // drops the error of an abort that fails after another failure, and S3
 // advises a repeat abort to free parts still in flight. An abort that still
 // fails is named in Put's error, since the upload's parts may then remain
-// until a lifecycle rule removes them. A failure of body is returned
-// wrapped and unclassified; any other failure is classified.
+// until a lifecycle rule removes them. Put's abort runs on a context
+// detached from ctx and bounded at 30 seconds, so a cancelled Put still
+// aborts what it started, and it treats NoSuchUpload, the answer for an
+// upload already aborted, as success. A failure of body is returned
+// wrapped and unclassified; any other failure is classified. Either begins
+// "s3:", a failure transfermanager reports included, and an abort named in
+// the error leaves the upload failure's classification as it was.
 //
 // Neither PutObject's answer nor CompleteMultipartUpload's carries a
 // Last-Modified, so a HeadObject follows either for the ModifiedAt the
@@ -71,7 +74,6 @@ func (c *Client) Put(ctx context.Context, key string, body io.Reader, opts stora
 	if opts.Size > 0 {
 		buf.Grow(int(min(opts.Size, c.partSize+1)))
 	}
-	// One byte past a part shows whether the body needs more than one.
 	n, err := buf.ReadFrom(io.LimitReader(src, c.partSize+1))
 	if err != nil {
 		return storage.Object{}, fmt.Errorf("s3: read body: %w", err)
@@ -118,16 +120,6 @@ func (c *Client) Put(ctx context.Context, key string, body io.Reader, opts stora
 	return obj, nil
 }
 
-// failedUpload returns the error Put reports for a failed multipart upload,
-// after it repeats the abort of the upload transfermanager started. The
-// body's own failure is returned unclassified, as it is before any request;
-// any other is classified. Either begins "s3:": transfermanager's own
-// message, "upload multipart failed, upload id: …, cause: …", names no
-// provider, so a failed part, a failed completion, or the caller's
-// cancellation gains the prefix around its classified error, which keeps
-// the classification and leaves a cancellation unclassified. A repeat abort
-// that fails is named in the error but never classifies it, since the
-// upload's failure is what Put reports.
 func (c *Client) failedUpload(ctx context.Context, key string, src *bodyReader, err error) error {
 	var abortErr error
 	if mpErr, ok := errors.AsType[transfermanager.MultipartUploadError](err); ok && mpErr.UploadID() != "" {
@@ -144,10 +136,6 @@ func (c *Client) failedUpload(ctx context.Context, key string, src *bodyReader, 
 	return err
 }
 
-// abortUpload sends AbortMultipartUpload for uploadID on a context detached
-// from the caller's, bounded by abortTimeout, so a cancelled Put still
-// aborts. NoSuchUpload, the answer for an upload already aborted, is
-// success.
 func (c *Client) abortUpload(ctx context.Context, key, uploadID string) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), abortTimeout)
 	defer cancel()
@@ -162,12 +150,6 @@ func (c *Client) abortUpload(ctx context.Context, key, uploadID string) error {
 	return nil
 }
 
-// bodyReader reads a Put body, counting its bytes and holding it to a
-// declared size above 0: a body that ends short of the size fails with an
-// error wrapping io.ErrUnexpectedEOF, and one that runs past it fails as
-// soon as the byte past the size arrives. It keeps the first failure, the
-// body's own or a size mismatch, in err, so Put can tell a body failure
-// from a request's, and returns it again on every later Read.
 type bodyReader struct {
 	r    io.Reader
 	size int64
@@ -181,7 +163,6 @@ func (b *bodyReader) Read(p []byte) (int, error) {
 	}
 	if b.size > 0 {
 		if b.n >= b.size {
-			// At the declared size, one more byte shows a longer body.
 			var one [1]byte
 			k, err := io.ReadAtLeast(b.r, one[:], 1)
 			switch {
@@ -217,6 +198,15 @@ func (b *bodyReader) Read(p []byte) (int, error) {
 // a lost connection as storage.ErrUnavailable, and an object deleted or
 // replaced before a resumption is storage.ErrNotFound, as classifyResume
 // maps it, since the version being read is gone.
+//
+// The body does not resume once ctx is done, after Close, when the first
+// answer carried no ETag to condition on, or when the failure came at or
+// after the last byte, where the only failure left is the SDK's checksum
+// check of a complete body. A resumption whose answer does not start at
+// the offset, from a service that ignored the Range, fails the read rather
+// than repeat or skip bytes. A failed read's error is returned again on
+// every later Read, and a Read that Close cuts off fails rather than
+// resumes.
 func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (storage.Blob, error) {
 	if err := validateKey(key); err != nil {
 		return storage.Blob{}, err
@@ -248,43 +238,23 @@ func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (sto
 	}, nil
 }
 
-// errBodyClosed is a Get body's read failure after Close.
 var errBodyClosed = errors.New("s3: read of a closed Get body")
 
-// resumingBody is a Get body that resumes a failed read. When a read of the
-// current answer's body fails, for a try's deadline or a lost connection,
-// it sends a ranged GetObject from its offset, Range bytes=<offset>-,
-// conditioned with If-Match on the first answer's ETag, so the bytes that
-// follow come from the version the read began on. One Read resumes at most
-// retries times before it returns the failure; a resumption's own
-// GetObject is retried by the SDK as any request is.
-//
-// It does not resume when the caller's context is done, after Close, when
-// the first answer carried no ETag to condition on, or when the failure
-// came at or after the last byte, where the only failure left is the SDK's
-// checksum check of a complete body. A failure it returns is returned again
-// on every later Read.
-//
-// The SDK validates a checksum only at the end of a whole object's body,
-// so a read that resumes is not checked; the package documentation says
-// so.
 type resumingBody struct {
 	c       *Client
 	ctx     context.Context
 	key     string
-	etag    string // the first answer's ETag, as the service sent it
-	size    int64  // the object's length, or -1 when the answer gave none
+	etag    string
+	size    int64
 	retries int
 
-	offset  int64 // bytes delivered so far
-	lastErr error // the failure that ended the last body
-	err     error // the failure every later Read returns
+	offset  int64
+	lastErr error
+	err     error
 	closed  atomic.Bool
 
-	// mu guards body, which Close may reach from another goroutine to cut
-	// off a Read in progress.
 	mu   sync.Mutex
-	body io.ReadCloser // the current answer's body; nil after a failure
+	body io.ReadCloser
 }
 
 func (b *resumingBody) Read(p []byte) (int, error) {
@@ -317,21 +287,17 @@ func (b *resumingBody) Read(p []byte) (int, error) {
 		b.setCurrent(nil)
 		b.lastErr = err
 		if n > 0 {
-			// Deliver what arrived; the next Read resumes after it.
 			return n, nil
 		}
 	}
 }
 
-// current returns the current answer's body, or nil after a failure.
 func (b *resumingBody) current() io.ReadCloser {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.body
 }
 
-// setCurrent makes body the current answer's body. A body set after Close
-// is closed at once.
 func (b *resumingBody) setCurrent(body io.ReadCloser) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -341,16 +307,10 @@ func (b *resumingBody) setCurrent(body io.ReadCloser) {
 	}
 }
 
-// resumable reports whether the failure that ended the last body may be
-// resumed after, as the type's documentation lists.
 func (b *resumingBody) resumable() bool {
 	return b.ctx.Err() == nil && b.etag != "" && (b.size < 0 || b.offset < b.size)
 }
 
-// resume sends the ranged, conditioned GetObject that continues the read at
-// its offset, and makes its body the current one. An answer that does not
-// start at the offset, from a service that ignored the Range, would repeat
-// or skip bytes, so it fails the read.
 func (b *resumingBody) resume() (io.ReadCloser, error) {
 	out, err := b.c.s3.GetObject(b.ctx, &awss3.GetObjectInput{
 		Bucket:  aws.String(b.c.bucket),
@@ -370,8 +330,6 @@ func (b *resumingBody) resume() (io.ReadCloser, error) {
 	return out.Body, nil
 }
 
-// Close closes the current answer's body and stops any later resumption,
-// so a Read it cuts off fails rather than resumes.
 func (b *resumingBody) Close() error {
 	b.closed.Store(true)
 	b.mu.Lock()
@@ -382,8 +340,6 @@ func (b *resumingBody) Close() error {
 	return nil
 }
 
-// classifiedBody classifies a Get body's read failures with classify and
-// passes io.EOF through unchanged.
 type classifiedBody struct{ io.ReadCloser }
 
 func (b classifiedBody) Read(p []byte) (int, error) {
@@ -469,21 +425,15 @@ func (c *Client) List(ctx context.Context, opts storage.ListOptions) (storage.Pa
 			continue
 		}
 		page.Objects = append(page.Objects, storage.Object{
-			Key:  *item.Key,
-			Size: aws.ToInt64(item.Size),
-			ETag: entityTag(item.ETag),
-			// A listing's time is ISO 8601 and may carry milliseconds, where
-			// the Last-Modified header Put, Get, and Stat read has whole
-			// seconds; truncating keeps the four in agreement.
+			Key:        *item.Key,
+			Size:       aws.ToInt64(item.Size),
+			ETag:       entityTag(item.ETag),
 			ModifiedAt: aws.ToTime(item.LastModified).UTC().Truncate(time.Second),
 		})
 	}
 	return page, nil
 }
 
-// entityTag returns the ETag the service sent in HTTP entity-tag form, or ""
-// when the answer carried none: an unquoted value gains its quotes, and a
-// quoted or W/"..." value is returned as it is.
 func entityTag(e *string) string {
 	s := aws.ToString(e)
 	if s == "" || strings.HasPrefix(s, `"`) || strings.HasPrefix(s, `W/"`) {

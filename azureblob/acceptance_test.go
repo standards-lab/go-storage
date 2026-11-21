@@ -19,17 +19,8 @@ import (
 	"github.com/standards-lab/go-storage/storagetest"
 )
 
-// endpointEnv names the Azurite (or Azure) service URL the acceptance tests
-// run against, for example http://127.0.0.1:10000/devstoreaccount1. The tests
-// skip when it is unset, so they never run on the unit tier. Azurite must run
-// with --skipApiVersionCheck for the SDK this module pins.
 const endpointEnv = "AZUREBLOB_TEST_ENDPOINT"
 
-// acceptanceConfig returns a finalized Config aimed at the endpoint the
-// environment names, over a container that exists for this test alone and is
-// deleted when the test ends. It skips the test when the endpoint is unset.
-// The block size is set to the SDK's 1 MiB floor, so the suite's 3 MiB
-// bodies take the staged-blocks path and not one Put Blob.
 func acceptanceConfig(t *testing.T) storage.Config {
 	t.Helper()
 	endpoint := os.Getenv(endpointEnv)
@@ -70,8 +61,6 @@ func acceptanceConfig(t *testing.T) storage.Config {
 	return cfg
 }
 
-// TestAcceptance_Conformance runs the conformance suite over the provider
-// against a real service. The suite creates the container itself.
 func TestAcceptance_Conformance(t *testing.T) {
 	cfg := acceptanceConfig(t)
 	storagetest.Run(t, func(t *testing.T) storage.Client {
@@ -79,8 +68,6 @@ func TestAcceptance_Conformance(t *testing.T) {
 	})
 }
 
-// TestAcceptance_MissingContainer runs the missing-container check against a
-// real service, over a container the test names and never creates.
 func TestAcceptance_MissingContainer(t *testing.T) {
 	cfg := acceptanceConfig(t)
 	storagetest.RunMissingContainer(t, func(t *testing.T) storage.Client {
@@ -88,11 +75,6 @@ func TestAcceptance_MissingContainer(t *testing.T) {
 	})
 }
 
-// TestAcceptance_StoreStart drives storage.Store over the provider against an
-// empty service: Start creates the container and reports ready, and the
-// object operations round-trip through the Store. It logs the ETag and
-// ModifiedAt each operation reports, so a run records what the service
-// answered.
 func TestAcceptance_StoreStart(t *testing.T) {
 	cfg := acceptanceConfig(t)
 	store := storage.New(newClient(t, cfg), cfg)

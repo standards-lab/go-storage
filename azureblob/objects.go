@@ -19,8 +19,6 @@ import (
 	"github.com/standards-lab/go-storage"
 )
 
-// defaultContentType is what Put sends and reports when opts.ContentType is
-// empty, the type the service stores for a blob written without one.
 const defaultContentType = "application/octet-stream"
 
 // Put uploads body through the SDK's streaming upload, which sends the Put
@@ -67,8 +65,6 @@ func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (sto
 		return storage.Blob{}, classify(err)
 	}
 	if resp.Body == nil {
-		// The SDK returns a body-less response only for a 304, which needs an
-		// access condition this method never sends; guard it all the same.
 		return storage.Blob{}, errors.New("azureblob: get blob returned no body")
 	}
 	return storage.Blob{
@@ -81,11 +77,6 @@ func (c *Client) Get(ctx context.Context, key string, _ storage.GetOptions) (sto
 	}, nil
 }
 
-// resuming returns the body of a Get. With readRetries above zero it is
-// the SDK's retry reader, which resumes a failed read from its offset with
-// a ranged GET conditioned on the ETag. With none it is the response body
-// itself, since the retry reader treats a count below 1 as its default
-// of 3.
 func (c *Client) resuming(ctx context.Context, resp blob.DownloadStreamResponse) io.ReadCloser {
 	if c.readRetries == 0 {
 		return resp.Body
@@ -93,8 +84,6 @@ func (c *Client) resuming(ctx context.Context, resp blob.DownloadStreamResponse)
 	return resp.NewRetryReader(ctx, &blob.RetryReaderOptions{MaxRetries: c.readRetries})
 }
 
-// classifiedBody classifies a Get body's read failures with classifyRead
-// and passes io.EOF through unchanged.
 type classifiedBody struct{ io.ReadCloser }
 
 func (b classifiedBody) Read(p []byte) (int, error) {
@@ -166,9 +155,6 @@ func (c *Client) List(ctx context.Context, opts storage.ListOptions) (storage.Pa
 			obj.Size = deref(p.ContentLength)
 			obj.ContentType = deref(p.ContentType)
 			obj.ETag = entityTag(p.ETag)
-			// azcore parses a listing's RFC 7231 time in a fixed GMT zone
-			// since v1.23.2; modifiedAt converts it to UTC, as it does the
-			// header time Put, Get, and Stat report.
 			obj.ModifiedAt = modifiedAt(p.LastModified)
 		}
 		page.Objects = append(page.Objects, obj)
@@ -176,14 +162,9 @@ func (c *Client) List(ctx context.Context, opts storage.ListOptions) (storage.Pa
 	return page, nil
 }
 
-// trackedReader counts the bytes read from a Put body, holds the body to its
-// declared size, and records the body's first error other than io.EOF, so Put
-// can tell a failure of the body from one of the upload. A recorded error is
-// repeated on every later Read, because the SDK drops an error that arrives
-// with the bytes completing a block.
 type trackedReader struct {
 	r    io.Reader
-	size int64 // the declared length, or 0 when unknown
+	size int64
 	n    atomic.Int64
 	err  atomic.Pointer[error]
 }
@@ -195,8 +176,6 @@ func (t *trackedReader) Read(p []byte) (int, error) {
 	if t.size > 0 {
 		remain := t.size - t.n.Load()
 		if remain <= 0 {
-			// The declared size is spent. One more byte from the body means
-			// it is longer than declared; none means it ended on it.
 			var probe [1]byte
 			n, err := t.r.Read(probe[:])
 			if n > 0 {
@@ -225,14 +204,11 @@ func (t *trackedReader) Read(p []byte) (int, error) {
 	}
 }
 
-// fail records err as the body's failure unless one is already recorded,
-// and returns the recorded one.
 func (t *trackedReader) fail(err error) error {
 	t.err.CompareAndSwap(nil, &err)
 	return t.readError()
 }
 
-// readError returns the first non-EOF error the body returned, or nil.
 func (t *trackedReader) readError() error {
 	if p := t.err.Load(); p != nil {
 		return *p
@@ -240,9 +216,6 @@ func (t *trackedReader) readError() error {
 	return nil
 }
 
-// entityTag returns the ETag the service sent in HTTP entity-tag form, or ""
-// when the response carried none: an unquoted listing value gains its quotes,
-// and a quoted or W/"..." value is returned as it is.
 func entityTag(e *azcore.ETag) string {
 	if e == nil {
 		return ""
@@ -254,17 +227,10 @@ func entityTag(e *azcore.ETag) string {
 	return `"` + s + `"`
 }
 
-// modifiedAt returns the service's last-modified time in UTC, or the zero
-// time when the answer carried none. The SDK parses a Last-Modified header
-// with time.RFC1123, which places it in a fixed "GMT" zone, or in
-// time.Local on a host whose zone abbreviates GMT, such as Europe/London;
-// a listing's time comes in a fixed GMT zone too. The contract asks for
-// UTC on every path.
 func modifiedAt(t *time.Time) time.Time {
 	return deref(t).UTC()
 }
 
-// deref returns *p, or T's zero value when p is nil.
 func deref[T any](p *T) T {
 	if p == nil {
 		var zero T

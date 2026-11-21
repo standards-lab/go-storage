@@ -19,8 +19,6 @@ import (
 	"github.com/standards-lab/go-storage/azureblob"
 )
 
-// The metadata the scripted service answers with, in the header form Azure
-// uses (a quoted ETag and an RFC 1123 date) and the value it parses to.
 const (
 	testETag         = `"0x8DDF0E1C2B3A4D5"`
 	testLastModified = "Fri, 18 Sep 2026 10:11:12 GMT"
@@ -28,14 +26,10 @@ const (
 
 var testModifiedAt = time.Date(2026, time.September, 18, 10, 11, 12, 0, time.UTC)
 
-// readOnly hides every method of the underlying reader except Read, so the
-// SDK sees a body it can neither seek nor measure.
 type readOnly struct{ r io.Reader }
 
 func (r readOnly) Read(p []byte) (int, error) { return r.r.Read(p) }
 
-// failAfter yields n bytes and then fails with err, standing in for a body
-// whose source broke mid-upload.
 type failAfter struct {
 	r   io.Reader
 	err error
@@ -53,9 +47,6 @@ func newFailAfter(n int, err error) *failAfter {
 	return &failAfter{r: bytes.NewReader(bytes.Repeat([]byte("x"), n)), err: err}
 }
 
-// wantObject asserts obj is the whole of the scripted metadata for key, size,
-// and contentType. The comparison is ==, so a ModifiedAt at the scripted
-// instant but outside time.UTC fails it.
 func wantObject(t *testing.T, what string, obj storage.Object, key string, size int64, contentType string) {
 	t.Helper()
 	want := storage.Object{Key: key, Size: size, ContentType: contentType, ETag: testETag, ModifiedAt: testModifiedAt}
@@ -64,8 +55,6 @@ func wantObject(t *testing.T, what string, obj storage.Object, key string, size 
 	}
 }
 
-// blobRequests returns the recorded requests that addressed a blob rather
-// than the container.
 func blobRequests(reqs []recorded) []recorded {
 	var out []recorded
 	for _, r := range reqs {
@@ -105,8 +94,6 @@ func TestPut_SendsBodyAndContentType(t *testing.T) {
 	}
 }
 
-// A Put without a ContentType sends and reports application/octet-stream,
-// the type the service would store anyway.
 func TestPut_NoContentTypeSendsOctetStream(t *testing.T) {
 	svc := newService(t, blobStored(testETag, testLastModified))
 	c := newClient(t, testConfig(t, svc.endpoint(), nil))
@@ -156,7 +143,7 @@ func TestPut_MultipleBlocks(t *testing.T) {
 	svc := newService(t, blobStored(testETag, testLastModified))
 	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"block_size": "1048576", "concurrency": "2"}))
 
-	const size = 5 << 19 // 2.5 MiB: two full 1 MiB blocks and a half one
+	const size = 5 << 19
 	content := bytes.Repeat([]byte{0xA5}, size)
 	obj, err := c.Put(t.Context(), "big", readOnly{bytes.NewReader(content)}, storage.PutOptions{ContentType: "application/octet-stream"})
 	if err != nil {
@@ -183,7 +170,6 @@ func TestPut_MultipleBlocks(t *testing.T) {
 			t.Errorf("unexpected request %s %s?%s", r.Method, r.Path, r.Query)
 		}
 	}
-	// Blocks are staged concurrently, so only the multiset of sizes is fixed.
 	var full, half int
 	for _, n := range blocks {
 		switch n {
@@ -210,7 +196,6 @@ func TestPut_MultipleBlocks(t *testing.T) {
 	}
 }
 
-// An unset block_size stages 4 MiB blocks.
 func TestPut_DefaultBlockSize(t *testing.T) {
 	svc := newService(t, blobStored(testETag, testLastModified))
 	c := newClient(t, testConfig(t, svc.endpoint(), nil))
@@ -231,14 +216,9 @@ func TestPut_DefaultBlockSize(t *testing.T) {
 	}
 }
 
-// concurrency bounds the blocks one Put stages at once, 4 when unset. The
-// service holds every Put Block until as many as the case expects are in
-// flight together, so a client with fewer workers never gets there; it then
-// holds each a moment longer, so a client with more workers sends its extra
-// block while the others are still held.
 func TestPut_Concurrency(t *testing.T) {
 	cases := []struct {
-		concurrency string // "" leaves the option unset
+		concurrency string
 		want        int
 	}{
 		{"", 4},
@@ -264,7 +244,6 @@ func TestPut_Concurrency(t *testing.T) {
 					select {
 					case <-full:
 					case <-time.After(5 * time.Second):
-						// Too few workers: stop holding the rest.
 						mu.Lock()
 						if !closed {
 							close(full)
@@ -285,8 +264,6 @@ func TestPut_Concurrency(t *testing.T) {
 			}
 			c := newClient(t, testConfig(t, svc.endpoint(), options))
 
-			// Two more 1 MiB blocks than the workers the case expects, so a
-			// client with more workers is caught.
 			body := make([]byte, (tc.want+2)<<20)
 			if _, err := c.Put(t.Context(), "k", readOnly{bytes.NewReader(body)}, storage.PutOptions{}); err != nil {
 				t.Fatalf("Put = %v, want nil", err)
@@ -300,8 +277,6 @@ func TestPut_Concurrency(t *testing.T) {
 	}
 }
 
-// wantNoCommit asserts none of reqs committed a blob: no Put Blob (a blob PUT
-// with no comp) and no Put Block List.
 func wantNoCommit(t *testing.T, reqs []recorded) {
 	t.Helper()
 	for _, r := range blobRequests(reqs) {
@@ -311,9 +286,6 @@ func wantNoCommit(t *testing.T, reqs []recorded) {
 	}
 }
 
-// wantCommit asserts reqs committed a blob exactly once, with a Put Blob when
-// blocks is 0 and otherwise with that many staged blocks and one Put Block
-// List.
 func wantCommit(t *testing.T, reqs []recorded, blocks int) {
 	t.Helper()
 	var staged, commits, puts int
@@ -340,19 +312,14 @@ func TestPut_DeclaredSize(t *testing.T) {
 		name    string
 		length  int
 		options map[string]string
-		// blocks is the number of staged blocks a successful upload of the
-		// body takes; 0 means one Put Blob.
-		blocks int
+		blocks  int
 	}{
 		{"within one block", 32, nil, 0},
 		{"across several blocks", 5 << 19, map[string]string{"block_size": "1048576"}, 3},
 	}
 	cases := []struct {
-		name string
-		// size is the declared Size for a body of n bytes.
-		size func(n int) int64
-		// wantShort expects the body to be reported short of its Size and
-		// wantLong past it; neither means the Put succeeds.
+		name                string
+		size                func(n int) int64
 		wantShort, wantLong bool
 	}{
 		{"Size equal to the body", func(n int) int64 { return int64(n) }, false, false},
@@ -520,10 +487,6 @@ func TestGet_MapsHeadersAndBody(t *testing.T) {
 	}
 }
 
-// rangedBody serves content as the Blob service does, honoring the
-// x-ms-range a resumed read sends. A request whose range starts before
-// offset stallAt stalls once it has sent the bytes up to stallAt, until
-// the try's deadline cancels the request.
 func rangedBody(content string, stallAt int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		from := 0
@@ -543,8 +506,6 @@ func rangedBody(content string, stallAt int) http.HandlerFunc {
 	}
 }
 
-// A body whose try deadline passes mid-read resumes from its offset with a
-// ranged GET conditioned on the ETag, so a transfer outlasts try_timeout.
 func TestGet_ResumesABodyPastTheTryTimeout(t *testing.T) {
 	svc := newService(t, rangedBody("helloworld", 5))
 	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "200ms", "max_retries": "1"}))
@@ -570,15 +531,12 @@ func TestGet_ResumesABodyPastTheTryTimeout(t *testing.T) {
 	}
 }
 
-// A body that stalls on every try resumes as many times per read as the
-// policy retries each request, and then fails the read as
-// storage.ErrUnavailable. With max_retries 0 the body does not resume.
 func TestGet_AStalledBodyFailsOnceItsRetriesAreSpent(t *testing.T) {
 	cases := []struct {
-		maxRetries string // "" leaves the option unset
-		requests   int    // the GET and its resumptions
+		maxRetries string
+		requests   int
 	}{
-		{"", 4}, // unset: the SDK's default of three retries
+		{"", 4},
 		{"0", 1},
 		{"1", 2},
 		{"2", 3},
@@ -625,9 +583,6 @@ func TestGet_AStalledBodyFailsOnceItsRetriesAreSpent(t *testing.T) {
 	}
 }
 
-// A blob replaced before a resumption fails the resumed GET's ETag
-// condition, which the read reports as storage.ErrNotFound: the version
-// being read is gone.
 func TestGet_ABlobReplacedMidReadIsNotFound(t *testing.T) {
 	svc := newService(t, rangedBody("helloworld", 5))
 	c := newClient(t, testConfig(t, svc.endpoint(), map[string]string{"try_timeout": "100ms", "max_retries": "1"}))
@@ -692,9 +647,6 @@ func TestStat_NotFound(t *testing.T) {
 	}
 }
 
-// A missing container is ErrContainerNotFound, never ErrNotFound, on the
-// put, the read, and the HEAD a stat sends, whose code arrives in the
-// x-ms-error-code header alone.
 func TestObjects_ContainerNotFound(t *testing.T) {
 	ops := map[string]func(c *azureblob.Client) error{
 		"Put": func(c *azureblob.Client) error {
@@ -728,7 +680,7 @@ func TestDelete(t *testing.T) {
 	cases := []struct {
 		name    string
 		respond http.HandlerFunc
-		want    error // the sentinel the error must match; nil means success
+		want    error
 	}{
 		{"accepted", status(http.StatusAccepted), nil},
 		{"blob not found", failWith(http.StatusNotFound, "BlobNotFound"), nil},
@@ -836,8 +788,6 @@ func TestList_Paging(t *testing.T) {
 }
 
 func TestList_ETagMatchesStat(t *testing.T) {
-	// The service quotes the ETag in the Get Blob Properties header and leaves
-	// it unquoted in the listing's XML; the client reports one form.
 	svc := newService(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("comp") == "list" {
 			writeListPage(w, listPage{Items: []listItem{{Name: "k", Size: 1, ETag: strings.Trim(testETag, `"`), LastModified: testLastModified}}})
@@ -942,13 +892,10 @@ func TestNew_RejectsBadUploadOptions(t *testing.T) {
 	}
 }
 
-// The Client reports every ETag in HTTP entity-tag form, whether the service
-// sent it quoted in a response header or unquoted in a listing's XML, and
-// reports none when the service sent none.
 func TestETag_EntityTagForm(t *testing.T) {
 	cases := []struct {
 		name string
-		sent string // "" sends no ETag
+		sent string
 		want string
 	}{
 		{"none", "", ""},
