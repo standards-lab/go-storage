@@ -121,7 +121,8 @@ func (c *Client) Stat(ctx context.Context, key string) (storage.Object, error) {
 }
 
 // Delete removes the blob at key and treats the service's BlobNotFound
-// answer as success.
+// answer as success. It sends no snapshot option, so deleting a blob that
+// has snapshots fails with the service's 409.
 func (c *Client) Delete(ctx context.Context, key string) error {
 	_, err := c.container.NewBlobClient(key).Delete(ctx, nil)
 	if bloberror.HasCode(err, bloberror.BlobNotFound) {

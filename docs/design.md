@@ -11,7 +11,7 @@ reversible thing a library ships: every provider implements it, and widening it 
 so the tier counts as a standard only once a second provider passes the `storagetest` suite. Two
 providers pass it, `azureblob` against Azurite and `s3` against SeaweedFS's S3 gateway, with no
 gateway-specific code path. Neither has run against its live service;
-`context/provider-assumptions.md` lists the claims that rest on that.
+[`provider-assumptions.md`](provider-assumptions.md) lists the claims that rest on that.
 
 Object storage is protocol-driven, not DSL-driven: a consumer calls operations with typed
 arguments, and there is no text artifact and no dialect.

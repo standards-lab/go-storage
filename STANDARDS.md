@@ -13,4 +13,4 @@ The judgement calls the standards-reviewer applies to go-storage, beyond what `m
 - `architecture/standards/go-elemental/principles/utc-times.md`: `Object.ModifiedAt` in the contract, `storagetest.Fake`, the conformance suite's Location checks, and the times `azureblob` and `s3` parse.
 - `architecture/standards/go-elemental/principles/construction-and-execution.md`: `storagetest.Options`, the one options value `storagetest.NewFake` takes; and every new exported function and constructor, `storagetest`'s included.
 - `architecture/principles/service-tiers.md`: `Client` and the `azureblob` and `s3` adapters beneath it.
-- `architecture/principles/context-architecture.md`: the README, `docs/design.md` and each `doc.go` are the homes.
+- `architecture/principles/context-architecture.md`: the README, `docs/design.md`, `docs/provider-assumptions.md` and each `doc.go` are the homes.
